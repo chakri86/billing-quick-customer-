@@ -82,6 +82,7 @@ class BillingRepository(private val db: AppDatabase) {
         lines: List<CartLine>,
         paymentMethod: PaymentMethod,
         requestedDiscountPaise: Long,
+        cashReceivedPaise: Long?,
         settings: ShopSettingsEntity
     ): Receipt = db.withTransaction {
         require(lines.isNotEmpty()) { "A bill must contain at least one item." }
@@ -95,6 +96,12 @@ class BillingRepository(private val db: AppDatabase) {
             taxRateBps = settings.taxRateBps,
             pricesIncludeTax = settings.pricesIncludeTax
         )
+        val received = cashReceivedPaise.takeIf { paymentMethod == PaymentMethod.CASH }
+        if (paymentMethod == PaymentMethod.CASH) {
+            require(received != null && received >= totals.totalPaise) {
+                "Cash received must be at least the amount due."
+            }
+        }
         val invoiceNumber = buildInvoiceNumber(now)
         val sale = SaleEntity(
             id = saleId,
@@ -106,7 +113,9 @@ class BillingRepository(private val db: AppDatabase) {
             discountPaise = totals.discountPaise,
             taxPaise = totals.taxPaise,
             totalPaise = totals.totalPaise,
-            paymentMethod = paymentMethod
+            paymentMethod = paymentMethod,
+            cashReceivedPaise = received,
+            changeReturnedPaise = received?.minus(totals.totalPaise)
         )
         db.saleDao().insertSale(sale)
         db.saleDao().insertItems(lines.map { line ->

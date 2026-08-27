@@ -45,7 +45,33 @@ class AppDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migrate2To3AddsCashAndUpiFieldsWithoutLosingSettings() {
+        helper.createDatabase(TEST_DB_V2, 2).apply {
+            execSQL(
+                """
+                INSERT INTO shop_settings (
+                    id, shopName, address, phone, taxEnabled, taxRateBps,
+                    pricesIncludeTax, receiptFooter, printerEnabled, updatedAt
+                ) VALUES (
+                    1, 'Quick Customer', '', '', 0, 0, 1, 'Thank you', 0, 1000
+                )
+                """.trimIndent()
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(TEST_DB_V2, 3, true, AppDatabase.MIGRATION_2_3).use { db ->
+            db.query("SELECT shopName, upiQrImageUri FROM shop_settings WHERE id = 1").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("Quick Customer", cursor.getString(0))
+                assertEquals("", cursor.getString(1))
+            }
+        }
+    }
+
     companion object {
         private const val TEST_DB = "chai-duniya-migration-test"
+        private const val TEST_DB_V2 = "quick-customer-migration-v2-test"
     }
 }

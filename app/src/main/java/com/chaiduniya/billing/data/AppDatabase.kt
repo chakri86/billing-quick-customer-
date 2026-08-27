@@ -128,7 +128,7 @@ interface AuditDao {
         ShopSettingsEntity::class,
         AuditLogEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(DbConverters::class)
@@ -147,7 +147,7 @@ abstract class AppDatabase : RoomDatabase() {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "chai-duniya-billing.db"
-            ).addMigrations(MIGRATION_1_2)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
                 .also { instance = it }
         }
@@ -193,6 +193,14 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_audit_logs_entityId ON audit_logs(entityId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_audit_logs_createdAt ON audit_logs(createdAt)")
+            }
+        }
+
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sales ADD COLUMN cashReceivedPaise INTEGER")
+                db.execSQL("ALTER TABLE sales ADD COLUMN changeReturnedPaise INTEGER")
+                db.execSQL("ALTER TABLE shop_settings ADD COLUMN upiQrImageUri TEXT NOT NULL DEFAULT ''")
             }
         }
     }

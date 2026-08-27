@@ -61,4 +61,11 @@ class BillingCalculatorTest {
         assertEquals(2_000, totals.discountPaise)
         assertEquals(0, totals.totalPaise)
     }
+
+    @Test
+    fun cashEntryParsesRupeesAndPaiseExactly() {
+        assertEquals(10_000L, Money.parseRupeesToPaise("100"))
+        assertEquals(4_050L, Money.parseRupeesToPaise("40.50"))
+        assertEquals(null, Money.parseRupeesToPaise("40.555"))
+    }
 }

@@ -1,5 +1,6 @@
 package com.chaiduniya.billing.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -48,6 +49,8 @@ data class SaleEntity(
     val taxPaise: Long = 0,
     val totalPaise: Long,
     val paymentMethod: PaymentMethod,
+    val cashReceivedPaise: Long? = null,
+    val changeReturnedPaise: Long? = null,
     val isCancelled: Boolean = false,
     val cancelledAt: Long? = null,
     val cancelledById: String? = null,
@@ -102,6 +105,7 @@ data class ShopSettingsEntity(
     val pricesIncludeTax: Boolean = true,
     val receiptFooter: String = "Thank you. Visit again!",
     val printerEnabled: Boolean = false,
+    @ColumnInfo(defaultValue = "''") val upiQrImageUri: String = "",
     val updatedAt: Long = System.currentTimeMillis()
 )
 

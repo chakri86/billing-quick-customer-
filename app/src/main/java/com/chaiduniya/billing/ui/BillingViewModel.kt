@@ -131,7 +131,11 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
 
     fun clearCart() = quantities.clear()
 
-    fun checkout(paymentMethod: PaymentMethod, requestedDiscountPaise: Long) {
+    fun checkout(
+        paymentMethod: PaymentMethod,
+        requestedDiscountPaise: Long,
+        cashReceivedPaise: Long? = null
+    ) {
         val user = currentUser ?: return
         val lines = cartLines()
         if (lines.isEmpty() || isSaving) return
@@ -140,7 +144,14 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val permittedDiscount = if (user.role == UserRole.EMPLOYEE) 0 else requestedDiscountPaise
             runCatching {
-                repository.completeSale(user, lines, paymentMethod, permittedDiscount, settings.value)
+                repository.completeSale(
+                    user,
+                    lines,
+                    paymentMethod,
+                    permittedDiscount,
+                    cashReceivedPaise,
+                    settings.value
+                )
             }
                 .onSuccess {
                     quantities.clear()

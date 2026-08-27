@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.2.0
+## Included in version 0.3.0
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -12,7 +12,10 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - All 72 supplied products in 12 categories
 - Offline Room/SQLite database
 - Product add, edit, price change, enable, and disable controls
-- Cart quantity controls and Cash/UPI/Card checkout
+- Cart quantity controls and guided Cash/UPI/Card checkout
+- Cash-received entry with automatic change calculation and receipt recording
+- Owner-uploaded, replaceable UPI QR image shown during UPI payment
+- Separate card-terminal payment confirmation
 - Admin/Super User discounts with tax-inclusive or tax-exclusive calculation
 - Super User shop, receipt, tax, and printer-preference settings
 - Admin/Super User completed-bill cancellation with a required reason
@@ -22,7 +25,7 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Role-filtered sales history with Today, 7-day, 30-day, and all-time totals
 - Cash/UPI/Card, discount, tax, cancellation, and top-product summaries
 - Pending-sync status and future multi-shop identifiers
-- Versioned Room migration from the 0.1 database
+- Versioned Room migrations from the 0.1 and 0.2 databases
 - Unit tests for permissions, billing calculations, totals, and menu completeness
 
 Cloud API synchronization and real ESC/POS Bluetooth printing are intentionally scheduled after the local billing core is accepted. The printer switch in Settings stores the owner's preference but does not connect to hardware yet. Bills are already marked with sync state, business ID, shop ID, and device ID so cloud sync does not require a database redesign.

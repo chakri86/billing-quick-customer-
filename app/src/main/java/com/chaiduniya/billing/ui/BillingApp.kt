@@ -2,7 +2,13 @@
 
 package com.chaiduniya.billing.ui
 
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -93,8 +99,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -440,9 +449,9 @@ private fun CartPane(viewModel: BillingViewModel, modifier: Modifier = Modifier)
         role = role,
         settings = settings,
         onDismiss = { checkoutDialog = false },
-        onConfirm = { method, discountPaise ->
+        onConfirm = { method, discountPaise, cashReceivedPaise ->
             checkoutDialog = false
-            viewModel.checkout(method, discountPaise)
+            viewModel.checkout(method, discountPaise, cashReceivedPaise)
         }
     )
 }
@@ -470,10 +479,12 @@ private fun CheckoutDialog(
     role: UserRole,
     settings: ShopSettingsEntity,
     onDismiss: () -> Unit,
-    onConfirm: (PaymentMethod, Long) -> Unit
+    onConfirm: (PaymentMethod, Long, Long?) -> Unit
 ) {
     var selected by remember { mutableStateOf(PaymentMethod.CASH) }
+    var step by remember { mutableStateOf(CheckoutStep.METHOD) }
     var discountRupees by remember { mutableStateOf("") }
+    var cashReceivedRupees by remember { mutableStateOf("") }
     val requestedDiscount = (discountRupees.toLongOrNull() ?: 0L) * 100L
     val totals = BillingCalculator.calculate(
         subtotalPaise = totalPaise,
@@ -482,43 +493,160 @@ private fun CheckoutDialog(
         taxRateBps = settings.taxRateBps,
         pricesIncludeTax = settings.pricesIncludeTax
     )
+    val cashReceivedPaise = Money.parseRupeesToPaise(cashReceivedRupees)
+    val changePaise = cashReceivedPaise?.minus(totals.totalPaise)
+    val cashIsEnough = cashReceivedPaise != null && changePaise != null && changePaise >= 0
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Payment") },
+        title = {
+            Text(
+                when (step) {
+                    CheckoutStep.METHOD -> "Payment"
+                    CheckoutStep.CASH -> "Cash payment"
+                    CheckoutStep.UPI -> "UPI payment"
+                    CheckoutStep.CARD -> "Card payment"
+                }
+            )
+        },
         text = {
-            Column {
-                Text("Subtotal: ${Money.format(totals.subtotalPaise)}", style = MaterialTheme.typography.titleMedium)
-                if (role != UserRole.EMPLOYEE) {
-                    OutlinedTextField(
-                        value = discountRupees,
-                        onValueChange = { discountRupees = it.filter(Char::isDigit) },
-                        label = { Text("Discount in ₹") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    )
-                }
-                if (totals.discountPaise > 0) Text("Discount: −${Money.format(totals.discountPaise)}")
-                if (settings.taxEnabled) {
-                    val rate = settings.taxRateBps / 100.0
-                    Text("Tax (${rate}%${if (settings.pricesIncludeTax) ", included" else ""}): ${Money.format(totals.taxPaise)}")
-                }
-                Text("Amount due: ${Money.format(totals.totalPaise)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(12.dp))
-                PaymentMethod.entries.forEach { method ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { selected = method }.padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(selected = selected == method, onClick = { selected = method })
-                        Text(method.name)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when (step) {
+                    CheckoutStep.METHOD -> {
+                        Text("Subtotal: ${Money.format(totals.subtotalPaise)}", style = MaterialTheme.typography.titleMedium)
+                        if (role != UserRole.EMPLOYEE) {
+                            OutlinedTextField(
+                                value = discountRupees,
+                                onValueChange = { discountRupees = it.filter(Char::isDigit) },
+                                label = { Text("Discount in ₹") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        if (totals.discountPaise > 0) Text("Discount: −${Money.format(totals.discountPaise)}")
+                        if (settings.taxEnabled) {
+                            val rate = settings.taxRateBps / 100.0
+                            Text("Tax (${rate}%${if (settings.pricesIncludeTax) ", included" else ""}): ${Money.format(totals.taxPaise)}")
+                        }
+                        Text("Amount due: ${Money.format(totals.totalPaise)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        PaymentMethod.entries.forEach { method ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable { selected = method }.padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(selected = selected == method, onClick = { selected = method })
+                                Text(method.name)
+                            }
+                        }
+                    }
+                    CheckoutStep.CASH -> {
+                        Text("Amount due", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(Money.format(totals.totalPaise), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        OutlinedTextField(
+                            value = cashReceivedRupees,
+                            onValueChange = { value ->
+                                val filtered = value.filter { it.isDigit() || it == '.' }
+                                val validInput = filtered.count { it == '.' } <= 1 &&
+                                    filtered.substringAfter('.', "").length <= 2
+                                if (validInput) cashReceivedRupees = filtered
+                            },
+                            label = { Text("Cash received in ₹") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        when {
+                            cashReceivedPaise == null -> Text("Enter the amount given by the customer.")
+                            !cashIsEnough -> Text(
+                                "Still due: ${Money.format(-requireNotNull(changePaise))}",
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Bold
+                            )
+                            else -> {
+                                Text("Return change", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(Money.format(requireNotNull(changePaise)), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    CheckoutStep.UPI -> {
+                        Text("Amount due: ${Money.format(totals.totalPaise)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        if (settings.upiQrImageUri.isBlank()) {
+                            Text(
+                                "UPI QR code is not configured. The Super User must upload it in Settings.",
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Bold
+                            )
+                        } else {
+                            QrCodeImage(settings.upiQrImageUri, Modifier.fillMaxWidth().heightIn(max = 320.dp))
+                            Text("Ask the customer to scan the QR code, then verify the payment before continuing.")
+                        }
+                    }
+                    CheckoutStep.CARD -> {
+                        Text("Amount due: ${Money.format(totals.totalPaise)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text("Complete the payment on the card terminal, then confirm that payment was received.")
                     }
                 }
             }
         },
-        confirmButton = { Button(onClick = { onConfirm(selected, totals.discountPaise) }) { Text("Confirm payment") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        confirmButton = {
+            when (step) {
+                CheckoutStep.METHOD -> Button(onClick = { step = CheckoutStep.from(selected) }) { Text("Proceed") }
+                CheckoutStep.CASH -> Button(
+                    onClick = { onConfirm(PaymentMethod.CASH, totals.discountPaise, cashReceivedPaise) },
+                    enabled = cashIsEnough
+                ) { Text("Complete sale") }
+                CheckoutStep.UPI -> Button(
+                    onClick = { onConfirm(PaymentMethod.UPI, totals.discountPaise, null) },
+                    enabled = settings.upiQrImageUri.isNotBlank()
+                ) { Text("Payment received") }
+                CheckoutStep.CARD -> Button(
+                    onClick = { onConfirm(PaymentMethod.CARD, totals.discountPaise, null) }
+                ) { Text("Payment received") }
+            }
+        },
+        dismissButton = {
+            Row {
+                if (step != CheckoutStep.METHOD) TextButton(onClick = { step = CheckoutStep.METHOD }) { Text("Back") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
     )
+}
+
+private enum class CheckoutStep {
+    METHOD, CASH, UPI, CARD;
+
+    companion object {
+        fun from(method: PaymentMethod): CheckoutStep = when (method) {
+            PaymentMethod.CASH -> CASH
+            PaymentMethod.UPI -> UPI
+            PaymentMethod.CARD -> CARD
+        }
+    }
+}
+
+@Composable
+private fun QrCodeImage(uriString: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val bitmap = remember(uriString) {
+        runCatching {
+            context.contentResolver.openInputStream(Uri.parse(uriString)).use { stream ->
+                BitmapFactory.decodeStream(stream)?.asImageBitmap()
+            }
+        }.getOrNull()
+    }
+    if (bitmap == null) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text("QR image cannot be opened. Upload it again in Settings.", color = MaterialTheme.colorScheme.error)
+        }
+    } else {
+        Image(
+            bitmap = bitmap,
+            contentDescription = "UPI payment QR code",
+            modifier = modifier,
+            contentScale = ContentScale.Fit
+        )
+    }
 }
 
 @Composable
@@ -559,6 +687,20 @@ private fun ReceiptDialog(receipt: Receipt, onDismiss: () -> Unit) {
                     Text(Money.format(receipt.sale.totalPaise), fontWeight = FontWeight.Bold)
                 }
                 Text("Paid by ${receipt.sale.paymentMethod.name}")
+                if (receipt.sale.paymentMethod == PaymentMethod.CASH) {
+                    receipt.sale.cashReceivedPaise?.let { received ->
+                        Row {
+                            Text("Cash received", Modifier.weight(1f))
+                            Text(Money.format(received))
+                        }
+                    }
+                    receipt.sale.changeReturnedPaise?.let { change ->
+                        Row {
+                            Text("Change returned", Modifier.weight(1f))
+                            Text(Money.format(change), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
                 if (receipt.settings.receiptFooter.isNotBlank()) {
                     Spacer(Modifier.height(10.dp))
                     Text(receipt.settings.receiptFooter, fontWeight = FontWeight.Medium)
@@ -871,6 +1013,7 @@ private fun AddUserDialog(onDismiss: () -> Unit, onSave: (String, String, UserRo
 @Composable
 private fun SettingsScreen(viewModel: BillingViewModel) {
     val settings by viewModel.settings.collectAsState()
+    val context = LocalContext.current
     var shopName by remember(settings.updatedAt) { mutableStateOf(settings.shopName) }
     var address by remember(settings.updatedAt) { mutableStateOf(settings.address) }
     var phone by remember(settings.updatedAt) { mutableStateOf(settings.phone) }
@@ -881,6 +1024,18 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
     var pricesIncludeTax by remember(settings.updatedAt) { mutableStateOf(settings.pricesIncludeTax) }
     var receiptFooter by remember(settings.updatedAt) { mutableStateOf(settings.receiptFooter) }
     var printerEnabled by remember(settings.updatedAt) { mutableStateOf(settings.printerEnabled) }
+    var upiQrImageUri by remember(settings.updatedAt) { mutableStateOf(settings.upiQrImageUri) }
+    val qrImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            upiQrImageUri = uri.toString()
+        }
+    }
     val parsedTaxBps = ((taxRate.toDoubleOrNull() ?: 0.0) * 100).toInt().coerceIn(0, 10_000)
     val valid = shopName.isNotBlank() && (!taxEnabled || parsedTaxBps > 0)
 
@@ -905,6 +1060,29 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
                 )
                 OutlinedTextField(receiptFooter, { receiptFooter = it }, label = { Text("Receipt footer") }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+
+        OutlinedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("UPI QR code", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "Upload the shop's current QR image. It will appear after the cashier selects UPI.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (upiQrImageUri.isNotBlank()) {
+                    QrCodeImage(upiQrImageUri, Modifier.fillMaxWidth().heightIn(max = 260.dp))
+                } else {
+                    Text("No QR image uploaded", color = MaterialTheme.colorScheme.error)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { qrImagePicker.launch(arrayOf("image/*")) }) {
+                        Text(if (upiQrImageUri.isBlank()) "Upload QR image" else "Replace QR image")
+                    }
+                    if (upiQrImageUri.isNotBlank()) {
+                        TextButton(onClick = { upiQrImageUri = "" }) { Text("Remove") }
+                    }
+                }
             }
         }
 
@@ -950,7 +1128,8 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
                         taxRateBps = if (taxEnabled) parsedTaxBps else 0,
                         pricesIncludeTax = pricesIncludeTax,
                         receiptFooter = receiptFooter.trim(),
-                        printerEnabled = printerEnabled
+                        printerEnabled = printerEnabled,
+                        upiQrImageUri = upiQrImageUri
                     )
                 )
             },

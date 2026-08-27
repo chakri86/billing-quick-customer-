@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — Guided payment flow
+
+- Replaced direct payment confirmation with a method-specific Proceed step.
+- Added cash-received entry, insufficient-cash protection, and automatic change calculation.
+- Added an owner-managed UPI QR image that appears during UPI checkout.
+- Added a separate card-terminal confirmation step.
+- Stored cash received and returned change with each completed cash bill and receipt.
+- Added a Room 2-to-3 migration that preserves existing bills and shop settings.
+
 ## 0.2.2 — Startup crash fix
 
 - Added the Kotlin standard library as an explicit runtime dependency.
