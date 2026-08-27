@@ -9,6 +9,7 @@ import java.util.Locale
 import java.util.UUID
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
+import com.chaiduniya.billing.domain.BillingCalculator
 import kotlinx.coroutines.flow.Flow
 
 class BillingRepository(private val db: AppDatabase) {
@@ -16,6 +17,9 @@ class BillingRepository(private val db: AppDatabase) {
     val users: Flow<List<UserEntity>> = db.userDao().observeAll()
     val sales: Flow<List<SaleEntity>> = db.saleDao().observeAll()
     val pendingSyncCount: Flow<Int> = db.saleDao().observePendingCount()
+    val settings: Flow<ShopSettingsEntity?> = db.settingsDao().observe()
+    val productSales: Flow<List<ProductSalesSummary>> = db.saleDao().observeProductSales()
+    val auditLogs: Flow<List<AuditLogEntity>> = db.auditDao().observeAll()
 
     suspend fun ensureSeeded() = db.withTransaction {
         if (db.userDao().count() == 0) {
@@ -28,6 +32,7 @@ class BillingRepository(private val db: AppDatabase) {
             )
         }
         if (db.productDao().count() == 0) db.productDao().insertAll(SeedData.products())
+        if (db.settingsDao().count() == 0) db.settingsDao().save(ShopSettingsEntity())
     }
 
     suspend fun authenticate(username: String, password: String): UserEntity? {
@@ -64,12 +69,21 @@ class BillingRepository(private val db: AppDatabase) {
     suspend fun completeSale(
         cashier: UserEntity,
         lines: List<CartLine>,
-        paymentMethod: PaymentMethod
+        paymentMethod: PaymentMethod,
+        requestedDiscountPaise: Long,
+        settings: ShopSettingsEntity
     ): Receipt = db.withTransaction {
         require(lines.isNotEmpty()) { "A bill must contain at least one item." }
         val now = System.currentTimeMillis()
         val saleId = UUID.randomUUID().toString()
-        val total = lines.sumOf { it.lineTotalPaise }
+        val subtotal = lines.sumOf { it.lineTotalPaise }
+        val totals = BillingCalculator.calculate(
+            subtotalPaise = subtotal,
+            requestedDiscountPaise = requestedDiscountPaise,
+            taxEnabled = settings.taxEnabled,
+            taxRateBps = settings.taxRateBps,
+            pricesIncludeTax = settings.pricesIncludeTax
+        )
         val invoiceNumber = buildInvoiceNumber(now)
         val sale = SaleEntity(
             id = saleId,
@@ -77,8 +91,10 @@ class BillingRepository(private val db: AppDatabase) {
             createdAt = now,
             cashierId = cashier.id,
             cashierName = cashier.displayName,
-            subtotalPaise = total,
-            totalPaise = total,
+            subtotalPaise = totals.subtotalPaise,
+            discountPaise = totals.discountPaise,
+            taxPaise = totals.taxPaise,
+            totalPaise = totals.totalPaise,
             paymentMethod = paymentMethod
         )
         db.saleDao().insertSale(sale)
@@ -93,7 +109,53 @@ class BillingRepository(private val db: AppDatabase) {
                 lineTotalPaise = line.lineTotalPaise
             )
         })
-        Receipt(sale, lines)
+        Receipt(sale, lines, settings)
+    }
+
+    suspend fun cancelSale(sale: SaleEntity, actor: UserEntity, reason: String) = db.withTransaction {
+        require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
+        require(reason.trim().length >= 3) { "Enter a cancellation reason." }
+        val changed = db.saleDao().cancel(
+            saleId = sale.id,
+            cancelledAt = System.currentTimeMillis(),
+            cancelledById = actor.id,
+            cancelledByName = actor.displayName,
+            reason = reason.trim()
+        )
+        require(changed == 1) { "This bill is already cancelled or no longer available." }
+        db.auditDao().insert(
+            AuditLogEntity(
+                id = UUID.randomUUID().toString(),
+                action = "SALE_CANCELLED",
+                entityType = "SALE",
+                entityId = sale.id,
+                actorId = actor.id,
+                actorName = actor.displayName,
+                reason = reason.trim()
+            )
+        )
+    }
+
+    suspend fun saveSettings(settings: ShopSettingsEntity, actor: UserEntity) = db.withTransaction {
+        require(actor.role == UserRole.SUPER_USER) { "Only the Super User can change shop settings." }
+        val safe = settings.copy(
+            id = 1,
+            shopName = settings.shopName.trim().ifBlank { "Chai Duniya" },
+            taxRateBps = settings.taxRateBps.coerceIn(0, 10_000),
+            updatedAt = System.currentTimeMillis()
+        )
+        db.settingsDao().save(safe)
+        db.auditDao().insert(
+            AuditLogEntity(
+                id = UUID.randomUUID().toString(),
+                action = "SHOP_SETTINGS_UPDATED",
+                entityType = "SHOP_SETTINGS",
+                entityId = "1",
+                actorId = actor.id,
+                actorName = actor.displayName,
+                reason = "Shop settings updated"
+            )
+        )
     }
 
     private fun newUser(

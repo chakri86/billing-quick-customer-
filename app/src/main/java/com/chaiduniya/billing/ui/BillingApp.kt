@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Visibility
@@ -107,9 +108,11 @@ import com.chaiduniya.billing.data.PaymentMethod
 import com.chaiduniya.billing.data.ProductEntity
 import com.chaiduniya.billing.data.Receipt
 import com.chaiduniya.billing.data.SaleEntity
+import com.chaiduniya.billing.data.ShopSettingsEntity
 import com.chaiduniya.billing.data.UserEntity
 import com.chaiduniya.billing.data.UserRole
 import com.chaiduniya.billing.domain.Money
+import com.chaiduniya.billing.domain.BillingCalculator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -206,6 +209,7 @@ private fun sectionsFor(role: UserRole): List<SectionItem> = buildList {
     add(SectionItem(AppSection.SALES, Icons.Default.BarChart))
     if (role != UserRole.EMPLOYEE) add(SectionItem(AppSection.PRODUCTS, Icons.Default.Inventory2))
     if (role == UserRole.SUPER_USER) add(SectionItem(AppSection.USERS, Icons.Default.AdminPanelSettings))
+    if (role == UserRole.SUPER_USER) add(SectionItem(AppSection.SETTINGS, Icons.Default.Settings))
 }
 
 @Composable
@@ -269,6 +273,7 @@ private fun AppShell(viewModel: BillingViewModel, user: UserEntity) {
                     AppSection.SALES -> SalesScreen(viewModel, user)
                     AppSection.PRODUCTS -> ProductsScreen(viewModel)
                     AppSection.USERS -> UsersScreen(viewModel)
+                    AppSection.SETTINGS -> SettingsScreen(viewModel)
                 }
             }
         }
@@ -394,6 +399,8 @@ private fun ProductPanel(products: List<ProductEntity>, onAdd: (ProductEntity) -
 @Composable
 private fun CartPane(viewModel: BillingViewModel, modifier: Modifier = Modifier) {
     val lines = viewModel.cartLines()
+    val settings by viewModel.settings.collectAsState()
+    val role = viewModel.currentUser?.role ?: UserRole.EMPLOYEE
     var checkoutDialog by remember { mutableStateOf(false) }
     Column(modifier.padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -430,8 +437,13 @@ private fun CartPane(viewModel: BillingViewModel, modifier: Modifier = Modifier)
     }
     if (checkoutDialog) CheckoutDialog(
         totalPaise = viewModel.cartTotalPaise(),
+        role = role,
+        settings = settings,
         onDismiss = { checkoutDialog = false },
-        onConfirm = { method -> checkoutDialog = false; viewModel.checkout(method) }
+        onConfirm = { method, discountPaise ->
+            checkoutDialog = false
+            viewModel.checkout(method, discountPaise)
+        }
     )
 }
 
@@ -453,14 +465,45 @@ private fun CartLineRow(line: CartLine, onMinus: () -> Unit, onPlus: () -> Unit)
 }
 
 @Composable
-private fun CheckoutDialog(totalPaise: Long, onDismiss: () -> Unit, onConfirm: (PaymentMethod) -> Unit) {
+private fun CheckoutDialog(
+    totalPaise: Long,
+    role: UserRole,
+    settings: ShopSettingsEntity,
+    onDismiss: () -> Unit,
+    onConfirm: (PaymentMethod, Long) -> Unit
+) {
     var selected by remember { mutableStateOf(PaymentMethod.CASH) }
+    var discountRupees by remember { mutableStateOf("") }
+    val requestedDiscount = (discountRupees.toLongOrNull() ?: 0L) * 100L
+    val totals = BillingCalculator.calculate(
+        subtotalPaise = totalPaise,
+        requestedDiscountPaise = if (role == UserRole.EMPLOYEE) 0 else requestedDiscount,
+        taxEnabled = settings.taxEnabled,
+        taxRateBps = settings.taxRateBps,
+        pricesIncludeTax = settings.pricesIncludeTax
+    )
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Payment") },
         text = {
             Column {
-                Text("Amount: ${Money.format(totalPaise)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Subtotal: ${Money.format(totals.subtotalPaise)}", style = MaterialTheme.typography.titleMedium)
+                if (role != UserRole.EMPLOYEE) {
+                    OutlinedTextField(
+                        value = discountRupees,
+                        onValueChange = { discountRupees = it.filter(Char::isDigit) },
+                        label = { Text("Discount in ₹") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    )
+                }
+                if (totals.discountPaise > 0) Text("Discount: −${Money.format(totals.discountPaise)}")
+                if (settings.taxEnabled) {
+                    val rate = settings.taxRateBps / 100.0
+                    Text("Tax (${rate}%${if (settings.pricesIncludeTax) ", included" else ""}): ${Money.format(totals.taxPaise)}")
+                }
+                Text("Amount due: ${Money.format(totals.totalPaise)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
                 PaymentMethod.entries.forEach { method ->
                     Row(
@@ -473,7 +516,7 @@ private fun CheckoutDialog(totalPaise: Long, onDismiss: () -> Unit, onConfirm: (
                 }
             }
         },
-        confirmButton = { Button(onClick = { onConfirm(selected) }) { Text("Confirm payment") } },
+        confirmButton = { Button(onClick = { onConfirm(selected, totals.discountPaise) }) { Text("Confirm payment") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
@@ -485,6 +528,10 @@ private fun ReceiptDialog(receipt: Receipt, onDismiss: () -> Unit) {
         title = { Text("Payment successful") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(receipt.settings.shopName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (receipt.settings.address.isNotBlank()) Text(receipt.settings.address)
+                if (receipt.settings.phone.isNotBlank()) Text(receipt.settings.phone)
+                Spacer(Modifier.height(8.dp))
                 Text(receipt.sale.invoiceNumber, fontWeight = FontWeight.Bold)
                 Text(formatDate(receipt.sale.createdAt), style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(12.dp))
@@ -495,11 +542,27 @@ private fun ReceiptDialog(receipt: Receipt, onDismiss: () -> Unit) {
                     }
                 }
                 Divider(Modifier.padding(vertical = 10.dp))
+                if (receipt.sale.discountPaise > 0) {
+                    Row {
+                        Text("Discount", Modifier.weight(1f))
+                        Text("−${Money.format(receipt.sale.discountPaise)}")
+                    }
+                }
+                if (receipt.sale.taxPaise > 0) {
+                    Row {
+                        Text("Tax", Modifier.weight(1f))
+                        Text(Money.format(receipt.sale.taxPaise))
+                    }
+                }
                 Row {
                     Text("Total", Modifier.weight(1f), fontWeight = FontWeight.Bold)
                     Text(Money.format(receipt.sale.totalPaise), fontWeight = FontWeight.Bold)
                 }
                 Text("Paid by ${receipt.sale.paymentMethod.name}")
+                if (receipt.settings.receiptFooter.isNotBlank()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(receipt.settings.receiptFooter, fontWeight = FontWeight.Medium)
+                }
                 Text("Saved locally • waiting for cloud sync", style = MaterialTheme.typography.bodySmall)
             }
         },
@@ -510,20 +573,98 @@ private fun ReceiptDialog(receipt: Receipt, onDismiss: () -> Unit) {
 @Composable
 private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
     val allSales by viewModel.sales.collectAsState()
-    val sales = if (user.role == UserRole.EMPLOYEE) allSales.filter { it.cashierId == user.id } else allSales
-    val total = sales.filterNot { it.isCancelled }.sumOf { it.totalPaise }
+    val productSales by viewModel.productSales.collectAsState()
+    var period by remember { mutableStateOf(ReportPeriod.TODAY) }
+    val cutoff = period.cutoff(System.currentTimeMillis())
+    val roleSales = if (user.role == UserRole.EMPLOYEE) allSales.filter { it.cashierId == user.id } else allSales
+    val sales = roleSales.filter { cutoff == null || it.createdAt >= cutoff }
+    val validSales = sales.filterNot { it.isCancelled }
+    val total = validSales.sumOf { it.totalPaise }
+    val discounts = validSales.sumOf { it.discountPaise }
+    val taxes = validSales.sumOf { it.taxPaise }
+    var cancelling by remember { mutableStateOf<SaleEntity?>(null) }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text(if (user.role == UserRole.EMPLOYEE) "My sales" else "Shop sales", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        LazyRow(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(ReportPeriod.entries) { item ->
+                FilterChip(
+                    selected = period == item,
+                    onClick = { period = item },
+                    label = { Text(item.label) }
+                )
+            }
+        }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SummaryCard("Bills", sales.size.toString(), Modifier.weight(1f))
+            SummaryCard("Completed", validSales.size.toString(), Modifier.weight(1f))
             SummaryCard("Sales", Money.format(total), Modifier.weight(1f))
+        }
+        LazyRow(
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            PaymentMethod.entries.forEach { method ->
+                item { SummaryCard(method.name, Money.format(validSales.filter { it.paymentMethod == method }.sumOf { it.totalPaise }), Modifier.width(150.dp)) }
+            }
+            item { SummaryCard("Discounts", Money.format(discounts), Modifier.width(150.dp)) }
+            item { SummaryCard("Tax", Money.format(taxes), Modifier.width(150.dp)) }
+            item { SummaryCard("Cancelled", sales.count { it.isCancelled }.toString(), Modifier.width(150.dp)) }
         }
         Spacer(Modifier.height(16.dp))
         if (sales.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No completed bills yet") }
         else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(sales, key = { it.id }) { sale -> SaleRow(sale) }
+            if (user.role != UserRole.EMPLOYEE && productSales.isNotEmpty()) {
+                item {
+                    Text("Top products (all time)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+                items(productSales.take(8), key = { "product-${it.productName}" }) { item ->
+                    ListItem(
+                        headlineContent = { Text(item.productName) },
+                        supportingContent = { Text("${item.quantity} sold") },
+                        trailingContent = { Text(Money.format(item.revenuePaise), fontWeight = FontWeight.SemiBold) }
+                    )
+                }
+                item {
+                    Text("Bills", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+                }
+            }
+            items(sales, key = { it.id }) { sale ->
+                SaleRow(sale, canCancel = user.role != UserRole.EMPLOYEE, onCancel = { cancelling = sale })
+            }
         }
+    }
+    cancelling?.let { sale ->
+        CancelSaleDialog(
+            sale = sale,
+            onDismiss = { cancelling = null },
+            onConfirm = { reason -> viewModel.cancelSale(sale, reason); cancelling = null }
+        )
+    }
+}
+
+private enum class ReportPeriod(val label: String) {
+    TODAY("Today"),
+    LAST_7_DAYS("7 days"),
+    LAST_30_DAYS("30 days"),
+    ALL_TIME("All time");
+
+    fun cutoff(now: Long): Long? = when (this) {
+        TODAY -> {
+            val calendar = java.util.Calendar.getInstance().apply {
+                timeInMillis = now
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+            calendar.timeInMillis
+        }
+        LAST_7_DAYS -> now - 7L * 24 * 60 * 60 * 1000
+        LAST_30_DAYS -> now - 30L * 24 * 60 * 60 * 1000
+        ALL_TIME -> null
     }
 }
 
@@ -538,14 +679,59 @@ private fun SummaryCard(label: String, value: String, modifier: Modifier = Modif
 }
 
 @Composable
-private fun SaleRow(sale: SaleEntity) {
-    OutlinedCard(Modifier.fillMaxWidth()) {
+private fun SaleRow(sale: SaleEntity, canCancel: Boolean, onCancel: () -> Unit) {
+    OutlinedCard(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.outlinedCardColors(
+            containerColor = if (sale.isCancelled) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surface
+        )
+    ) {
         ListItem(
-            headlineContent = { Text(sale.invoiceNumber, fontWeight = FontWeight.SemiBold) },
-            supportingContent = { Text("${formatDate(sale.createdAt)} • ${sale.cashierName} • ${sale.paymentMethod.name}") },
-            trailingContent = { Text(Money.format(sale.totalPaise), fontWeight = FontWeight.Bold) }
+            headlineContent = {
+                Text(
+                    "${sale.invoiceNumber}${if (sale.isCancelled) " • CANCELLED" else ""}",
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
+            supportingContent = {
+                Column {
+                    Text("${formatDate(sale.createdAt)} • ${sale.cashierName} • ${sale.paymentMethod.name}")
+                    sale.cancellationReason?.let { Text("Reason: $it", color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            trailingContent = {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(Money.format(sale.totalPaise), fontWeight = FontWeight.Bold)
+                    if (canCancel && !sale.isCancelled) TextButton(onClick = onCancel) { Text("Cancel") }
+                }
+            }
         )
     }
+}
+
+@Composable
+private fun CancelSaleDialog(sale: SaleEntity, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var reason by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Cancel completed bill?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("${sale.invoiceNumber} • ${Money.format(sale.totalPaise)}")
+                Text("The original transaction will remain in the audit history.")
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = { reason = it },
+                    label = { Text("Cancellation reason") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(reason.trim()) }, enabled = reason.trim().length >= 3) { Text("Cancel bill") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Keep bill") } }
+    )
 }
 
 @Composable
@@ -680,6 +866,115 @@ private fun AddUserDialog(onDismiss: () -> Unit, onSave: (String, String, UserRo
         confirmButton = { Button(onClick = { onSave(username, displayName, role, password) }, enabled = valid) { Text("Create") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+@Composable
+private fun SettingsScreen(viewModel: BillingViewModel) {
+    val settings by viewModel.settings.collectAsState()
+    var shopName by remember(settings.updatedAt) { mutableStateOf(settings.shopName) }
+    var address by remember(settings.updatedAt) { mutableStateOf(settings.address) }
+    var phone by remember(settings.updatedAt) { mutableStateOf(settings.phone) }
+    var taxEnabled by remember(settings.updatedAt) { mutableStateOf(settings.taxEnabled) }
+    var taxRate by remember(settings.updatedAt) {
+        mutableStateOf(if (settings.taxRateBps == 0) "" else (settings.taxRateBps / 100.0).toString().removeSuffix(".0"))
+    }
+    var pricesIncludeTax by remember(settings.updatedAt) { mutableStateOf(settings.pricesIncludeTax) }
+    var receiptFooter by remember(settings.updatedAt) { mutableStateOf(settings.receiptFooter) }
+    var printerEnabled by remember(settings.updatedAt) { mutableStateOf(settings.printerEnabled) }
+    val parsedTaxBps = ((taxRate.toDoubleOrNull() ?: 0.0) * 100).toInt().coerceIn(0, 10_000)
+    val valid = shopName.isNotBlank() && (!taxEnabled || parsedTaxBps > 0)
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text("Shop settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("Only the Super User can change these values.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        OutlinedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Shop details", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                OutlinedTextField(shopName, { shopName = it }, label = { Text("Shop name") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(address, { address = it }, label = { Text("Address") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                OutlinedTextField(
+                    phone,
+                    { phone = it },
+                    label = { Text("Phone") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+                )
+                OutlinedTextField(receiptFooter, { receiptFooter = it }, label = { Text("Receipt footer") }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+
+        OutlinedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingToggle("Enable tax", "Tax is disabled by default.", taxEnabled) { taxEnabled = it }
+                if (taxEnabled) {
+                    OutlinedTextField(
+                        taxRate,
+                        { value -> taxRate = value.filter { it.isDigit() || it == '.' }.take(6) },
+                        label = { Text("Tax rate (%)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                    )
+                    SettingToggle(
+                        "Prices include tax",
+                        if (pricesIncludeTax) "Tax is calculated from the displayed menu price." else "Tax is added to the displayed menu price.",
+                        pricesIncludeTax
+                    ) { pricesIncludeTax = it }
+                }
+            }
+        }
+
+        OutlinedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                SettingToggle(
+                    "Bluetooth receipt printer",
+                    "Stores the owner preference. Physical ESC/POS connection arrives in the printer milestone.",
+                    printerEnabled
+                ) { printerEnabled = it }
+            }
+        }
+
+        Button(
+            onClick = {
+                viewModel.saveSettings(
+                    settings.copy(
+                        shopName = shopName,
+                        address = address.trim(),
+                        phone = phone.trim(),
+                        taxEnabled = taxEnabled,
+                        taxRateBps = if (taxEnabled) parsedTaxBps else 0,
+                        pricesIncludeTax = pricesIncludeTax,
+                        receiptFooter = receiptFooter.trim(),
+                        printerEnabled = printerEnabled
+                    )
+                )
+            },
+            enabled = valid,
+            modifier = Modifier.fillMaxWidth().height(52.dp)
+        ) { Text("Save settings") }
+        Spacer(Modifier.windowInsetsPadding(WindowInsets.navigationBars))
+    }
+}
+
+@Composable
+private fun SettingToggle(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
 }
 
 private fun UserRole.displayName(): String = when (this) {

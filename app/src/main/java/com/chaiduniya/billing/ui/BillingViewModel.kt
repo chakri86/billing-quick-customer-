@@ -13,14 +13,25 @@ import com.chaiduniya.billing.data.PaymentMethod
 import com.chaiduniya.billing.data.ProductEntity
 import com.chaiduniya.billing.data.Receipt
 import com.chaiduniya.billing.data.SaleEntity
+import com.chaiduniya.billing.data.ShopSettingsEntity
+import com.chaiduniya.billing.data.ProductSalesSummary
 import com.chaiduniya.billing.data.UserEntity
 import com.chaiduniya.billing.data.UserRole
+import com.chaiduniya.billing.domain.AccessPolicy
+import com.chaiduniya.billing.domain.AppPermission
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-enum class AppSection(val label: String) { BILLING("Billing"), SALES("Sales"), PRODUCTS("Products"), USERS("Users") }
+enum class AppSection(val label: String) {
+    BILLING("Billing"),
+    SALES("Sales"),
+    PRODUCTS("Products"),
+    USERS("Users"),
+    SETTINGS("Settings")
+}
 
 class BillingViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as ChaiDuniyaApplication).repository
@@ -36,6 +47,12 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     )
     val pendingSyncCount: StateFlow<Int> = repository.pendingSyncCount.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), 0
+    )
+    val settings: StateFlow<ShopSettingsEntity> = repository.settings
+        .map { it ?: ShopSettingsEntity() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ShopSettingsEntity())
+    val productSales: StateFlow<List<ProductSalesSummary>> = repository.productSales.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
 
     var currentUser by mutableStateOf<UserEntity?>(null)
@@ -83,7 +100,17 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         lastReceipt = null
     }
 
-    fun selectSection(section: AppSection) { currentSection = section }
+    fun selectSection(section: AppSection) {
+        val role = currentUser?.role ?: return
+        val permitted = when (section) {
+            AppSection.BILLING -> AccessPolicy.allows(role, AppPermission.CREATE_BILL)
+            AppSection.SALES -> true
+            AppSection.PRODUCTS -> AccessPolicy.allows(role, AppPermission.MANAGE_PRODUCTS)
+            AppSection.USERS -> AccessPolicy.allows(role, AppPermission.MANAGE_USERS)
+            AppSection.SETTINGS -> AccessPolicy.allows(role, AppPermission.MANAGE_SHOP)
+        }
+        if (permitted) currentSection = section else operationError = "Your role does not allow this action."
+    }
     fun selectCategory(category: String) { selectedCategory = category }
 
     fun cartLines(): List<CartLine> = products.value.mapNotNull { product ->
@@ -104,14 +131,17 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
 
     fun clearCart() = quantities.clear()
 
-    fun checkout(paymentMethod: PaymentMethod) {
+    fun checkout(paymentMethod: PaymentMethod, requestedDiscountPaise: Long) {
         val user = currentUser ?: return
         val lines = cartLines()
         if (lines.isEmpty() || isSaving) return
         isSaving = true
         operationError = null
         viewModelScope.launch {
-            runCatching { repository.completeSale(user, lines, paymentMethod) }
+            val permittedDiscount = if (user.role == UserRole.EMPLOYEE) 0 else requestedDiscountPaise
+            runCatching {
+                repository.completeSale(user, lines, paymentMethod, permittedDiscount, settings.value)
+            }
                 .onSuccess {
                     quantities.clear()
                     lastReceipt = it
@@ -125,6 +155,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     fun dismissError() { operationError = null }
 
     fun saveProduct(existing: ProductEntity?, name: String, category: String, priceRupees: Long) {
+        if (!hasPermission(AppPermission.MANAGE_PRODUCTS)) return
         viewModelScope.launch {
             runCatching {
                 if (existing == null) repository.addProduct(name, category, priceRupees)
@@ -136,10 +167,12 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun toggleProduct(product: ProductEntity) {
+        if (!hasPermission(AppPermission.MANAGE_PRODUCTS)) return
         viewModelScope.launch { repository.updateProduct(product.copy(isActive = !product.isActive)) }
     }
 
     fun addUser(username: String, displayName: String, role: UserRole, password: String) {
+        if (!hasPermission(AppPermission.MANAGE_USERS)) return
         viewModelScope.launch {
             runCatching { repository.addUser(username, displayName, role, password) }
                 .onFailure { operationError = it.message ?: "User could not be created." }
@@ -147,10 +180,36 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun toggleUser(user: UserEntity) {
+        if (!hasPermission(AppPermission.MANAGE_USERS)) return
         if (user.id == currentUser?.id) {
             operationError = "You cannot deactivate your own signed-in account."
             return
         }
         viewModelScope.launch { repository.updateUser(user.copy(isActive = !user.isActive)) }
+    }
+
+    fun cancelSale(sale: SaleEntity, reason: String) {
+        if (!hasPermission(AppPermission.CANCEL_COMPLETED_BILL)) return
+        val actor = currentUser ?: return
+        viewModelScope.launch {
+            runCatching { repository.cancelSale(sale, actor, reason) }
+                .onFailure { operationError = it.message ?: "Bill could not be cancelled." }
+        }
+    }
+
+    fun saveSettings(settings: ShopSettingsEntity) {
+        if (!hasPermission(AppPermission.MANAGE_SHOP)) return
+        val actor = currentUser ?: return
+        viewModelScope.launch {
+            runCatching { repository.saveSettings(settings, actor) }
+                .onFailure { operationError = it.message ?: "Settings could not be saved." }
+        }
+    }
+
+    private fun hasPermission(permission: AppPermission): Boolean {
+        val role = currentUser?.role
+        if (role != null && AccessPolicy.allows(role, permission)) return true
+        operationError = "Your role does not allow this action."
+        return false
     }
 }

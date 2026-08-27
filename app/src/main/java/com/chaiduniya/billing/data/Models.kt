@@ -49,6 +49,10 @@ data class SaleEntity(
     val totalPaise: Long,
     val paymentMethod: PaymentMethod,
     val isCancelled: Boolean = false,
+    val cancelledAt: Long? = null,
+    val cancelledById: String? = null,
+    val cancelledByName: String? = null,
+    val cancellationReason: String? = null,
     val syncStatus: SyncStatus = SyncStatus.PENDING
 )
 
@@ -83,5 +87,39 @@ data class CartLine(
 
 data class Receipt(
     val sale: SaleEntity,
-    val lines: List<CartLine>
+    val lines: List<CartLine>,
+    val settings: ShopSettingsEntity
+)
+
+@Entity(tableName = "shop_settings")
+data class ShopSettingsEntity(
+    @PrimaryKey val id: Int = 1,
+    val shopName: String = "Chai Duniya",
+    val address: String = "",
+    val phone: String = "",
+    val taxEnabled: Boolean = false,
+    val taxRateBps: Int = 0,
+    val pricesIncludeTax: Boolean = true,
+    val receiptFooter: String = "Thank you. Visit again!",
+    val printerEnabled: Boolean = false,
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "audit_logs", indices = [Index("entityId"), Index("createdAt")])
+data class AuditLogEntity(
+    @PrimaryKey val id: String,
+    val action: String,
+    val entityType: String,
+    val entityId: String,
+    val actorId: String,
+    val actorName: String,
+    val reason: String,
+    val createdAt: Long = System.currentTimeMillis(),
+    val syncStatus: SyncStatus = SyncStatus.PENDING
+)
+
+data class ProductSalesSummary(
+    val productName: String,
+    val quantity: Long,
+    val revenuePaise: Long
 )

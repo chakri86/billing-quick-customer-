@@ -11,6 +11,8 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 class DbConverters {
@@ -47,13 +49,65 @@ interface ProductDao {
 interface SaleDao {
     @Query("SELECT * FROM sales ORDER BY createdAt DESC") fun observeAll(): Flow<List<SaleEntity>>
     @Query("SELECT COUNT(*) FROM sales WHERE syncStatus != 'SYNCED'") fun observePendingCount(): Flow<Int>
+    @Query(
+        """
+        SELECT si.productNameSnapshot AS productName,
+               SUM(si.quantity) AS quantity,
+               SUM(si.lineTotalPaise) AS revenuePaise
+        FROM sale_items si
+        INNER JOIN sales s ON s.id = si.saleId
+        WHERE s.isCancelled = 0
+        GROUP BY si.productNameSnapshot
+        ORDER BY quantity DESC, productName ASC
+        """
+    )
+    fun observeProductSales(): Flow<List<ProductSalesSummary>>
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertSale(sale: SaleEntity)
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertItems(items: List<SaleItemEntity>)
+    @Query(
+        """
+        UPDATE sales
+        SET isCancelled = 1,
+            cancelledAt = :cancelledAt,
+            cancelledById = :cancelledById,
+            cancelledByName = :cancelledByName,
+            cancellationReason = :reason,
+            syncStatus = 'PENDING'
+        WHERE id = :saleId AND isCancelled = 0
+        """
+    )
+    suspend fun cancel(
+        saleId: String,
+        cancelledAt: Long,
+        cancelledById: String,
+        cancelledByName: String,
+        reason: String
+    ): Int
+}
+
+@Dao
+interface SettingsDao {
+    @Query("SELECT COUNT(*) FROM shop_settings") suspend fun count(): Int
+    @Query("SELECT * FROM shop_settings WHERE id = 1") fun observe(): Flow<ShopSettingsEntity?>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun save(settings: ShopSettingsEntity)
+}
+
+@Dao
+interface AuditDao {
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(entry: AuditLogEntity)
+    @Query("SELECT * FROM audit_logs ORDER BY createdAt DESC") fun observeAll(): Flow<List<AuditLogEntity>>
 }
 
 @Database(
-    entities = [UserEntity::class, ProductEntity::class, SaleEntity::class, SaleItemEntity::class],
-    version = 1,
+    entities = [
+        UserEntity::class,
+        ProductEntity::class,
+        SaleEntity::class,
+        SaleItemEntity::class,
+        ShopSettingsEntity::class,
+        AuditLogEntity::class
+    ],
+    version = 2,
     exportSchema = true
 )
 @TypeConverters(DbConverters::class)
@@ -61,6 +115,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
     abstract fun productDao(): ProductDao
     abstract fun saleDao(): SaleDao
+    abstract fun settingsDao(): SettingsDao
+    abstract fun auditDao(): AuditDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -70,7 +126,53 @@ abstract class AppDatabase : RoomDatabase() {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "chai-duniya-billing.db"
-            ).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2)
+                .build()
+                .also { instance = it }
+        }
+
+        internal val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sales ADD COLUMN cancelledAt INTEGER")
+                db.execSQL("ALTER TABLE sales ADD COLUMN cancelledById TEXT")
+                db.execSQL("ALTER TABLE sales ADD COLUMN cancelledByName TEXT")
+                db.execSQL("ALTER TABLE sales ADD COLUMN cancellationReason TEXT")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS shop_settings (
+                        id INTEGER NOT NULL,
+                        shopName TEXT NOT NULL,
+                        address TEXT NOT NULL,
+                        phone TEXT NOT NULL,
+                        taxEnabled INTEGER NOT NULL,
+                        taxRateBps INTEGER NOT NULL,
+                        pricesIncludeTax INTEGER NOT NULL,
+                        receiptFooter TEXT NOT NULL,
+                        printerEnabled INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        PRIMARY KEY(id)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS audit_logs (
+                        id TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        entityType TEXT NOT NULL,
+                        entityId TEXT NOT NULL,
+                        actorId TEXT NOT NULL,
+                        actorName TEXT NOT NULL,
+                        reason TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        syncStatus TEXT NOT NULL,
+                        PRIMARY KEY(id)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_audit_logs_entityId ON audit_logs(entityId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_audit_logs_createdAt ON audit_logs(createdAt)")
+            }
         }
     }
 }

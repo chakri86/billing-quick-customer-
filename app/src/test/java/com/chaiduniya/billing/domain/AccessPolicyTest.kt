@@ -17,6 +17,7 @@ class AccessPolicyTest {
     fun adminCannotManageUsersOrOwnership() {
         assertTrue(AccessPolicy.allows(UserRole.ADMIN, AppPermission.MANAGE_PRODUCTS))
         assertTrue(AccessPolicy.allows(UserRole.ADMIN, AppPermission.VIEW_ALL_SALES))
+        assertTrue(AccessPolicy.allows(UserRole.ADMIN, AppPermission.CANCEL_COMPLETED_BILL))
         assertFalse(AccessPolicy.allows(UserRole.ADMIN, AppPermission.MANAGE_USERS))
         assertFalse(AccessPolicy.allows(UserRole.ADMIN, AppPermission.MANAGE_SHOP))
     }
