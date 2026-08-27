@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 — Quick Customer branding
+
+- Renamed the visible application brand from Chai Duniya to Quick Customer.
+- Updated the launcher label, login screen, default shop name, and branded menu entries.
+- Added a safe one-time update for existing local installations while preserving bills and settings.
+
 ## 0.2.0 — Local shop workflow
 
 - Added editable shop and receipt settings for the Super User.

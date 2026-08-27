@@ -153,7 +153,7 @@ private fun LoginScreen(viewModel: BillingViewModel) {
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Icon(Icons.Default.Storefront, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
-                Text("Chai Duniya", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("Quick Customer", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text("Billing Console", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(
                     value = username,

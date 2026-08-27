@@ -10,7 +10,7 @@
         android:name=".ChaiDuniyaApplication"
         android:allowBackup="true"
         android:fullBackupContent="true"
-        android:label="Chai Duniya Billing"
+        android:label="Quick Customer"
         android:supportsRtl="true"
         android:theme="@style/Theme.ChaiDuniya">
         <activity

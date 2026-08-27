@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ChaiDuniyaBilling"
+rootProject.name = "QuickCustomerBilling"
 include(":app")

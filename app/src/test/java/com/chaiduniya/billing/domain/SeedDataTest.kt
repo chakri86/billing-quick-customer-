@@ -11,5 +11,7 @@ class SeedDataTest {
         assertEquals(72, SeedData.menu.size)
         assertEquals(12, SeedData.menu.map { it.category }.distinct().size)
         assertTrue(SeedData.menu.all { it.name.isNotBlank() && it.rupees > 0 })
+        assertTrue(SeedData.menu.any { it.name == "Quick Customer Spl Tea" })
+        assertTrue(SeedData.menu.none { "Chai Duniya" in it.name || "Chai Duniya" in it.category })
     }
 }

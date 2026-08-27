@@ -1,6 +1,6 @@
-# Chai Duniya Billing — Android MVP
+# Quick Customer — Android Billing App
 
-This repository contains the runnable offline-first Chai Duniya billing application.
+This repository contains the runnable offline-first Quick Customer billing application.
 
 ## Included in version 0.2.0
 

@@ -94,7 +94,7 @@ data class Receipt(
 @Entity(tableName = "shop_settings")
 data class ShopSettingsEntity(
     @PrimaryKey val id: Int = 1,
-    val shopName: String = "Chai Duniya",
+    val shopName: String = "Quick Customer",
     val address: String = "",
     val phone: String = "",
     val taxEnabled: Boolean = false,

@@ -31,8 +31,19 @@ class BillingRepository(private val db: AppDatabase) {
                 )
             )
         }
-        if (db.productDao().count() == 0) db.productDao().insertAll(SeedData.products())
+        if (db.productDao().count() == 0) {
+            db.productDao().insertAll(SeedData.products())
+        } else {
+            db.productDao().renameBrand(
+                oldName = "Chai Duniya Spl Tea",
+                newName = "Quick Customer Spl Tea",
+                oldCategory = "Chai Duniya Special Shakes",
+                newCategory = "Quick Customer Special Shakes",
+                updatedAt = System.currentTimeMillis()
+            )
+        }
         if (db.settingsDao().count() == 0) db.settingsDao().save(ShopSettingsEntity())
+        else db.settingsDao().renameDefaultShop("Chai Duniya", "Quick Customer", System.currentTimeMillis())
     }
 
     suspend fun authenticate(username: String, password: String): UserEntity? {
@@ -140,7 +151,7 @@ class BillingRepository(private val db: AppDatabase) {
         require(actor.role == UserRole.SUPER_USER) { "Only the Super User can change shop settings." }
         val safe = settings.copy(
             id = 1,
-            shopName = settings.shopName.trim().ifBlank { "Chai Duniya" },
+            shopName = settings.shopName.trim().ifBlank { "Quick Customer" },
             taxRateBps = settings.taxRateBps.coerceIn(0, 10_000),
             updatedAt = System.currentTimeMillis()
         )

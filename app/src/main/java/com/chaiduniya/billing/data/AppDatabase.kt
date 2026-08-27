@@ -43,6 +43,23 @@ interface ProductDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertAll(products: List<ProductEntity>)
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(product: ProductEntity)
     @Update suspend fun update(product: ProductEntity)
+    @Query(
+        """
+        UPDATE products
+        SET name = CASE WHEN name = :oldName THEN :newName ELSE name END,
+            category = CASE WHEN category = :oldCategory THEN :newCategory ELSE category END,
+            updatedAt = :updatedAt,
+            syncStatus = 'PENDING'
+        WHERE name = :oldName OR category = :oldCategory
+        """
+    )
+    suspend fun renameBrand(
+        oldName: String,
+        newName: String,
+        oldCategory: String,
+        newCategory: String,
+        updatedAt: Long
+    )
 }
 
 @Dao
@@ -90,6 +107,10 @@ interface SettingsDao {
     @Query("SELECT COUNT(*) FROM shop_settings") suspend fun count(): Int
     @Query("SELECT * FROM shop_settings WHERE id = 1") fun observe(): Flow<ShopSettingsEntity?>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun save(settings: ShopSettingsEntity)
+    @Query(
+        "UPDATE shop_settings SET shopName = :newName, updatedAt = :updatedAt WHERE id = 1 AND shopName = :oldName"
+    )
+    suspend fun renameDefaultShop(oldName: String, newName: String, updatedAt: Long)
 }
 
 @Dao
