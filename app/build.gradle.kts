@@ -13,8 +13,8 @@ android {
         applicationId = "com.chaiduniya.billing"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.2.1"
+        versionCode = 4
+        versionName = "0.2.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -58,6 +58,9 @@ ksp {
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.03.01")
 
+    // Keep the Kotlin runtime in the APK. Without this explicit dependency,
+    // standalone installs can crash before Application.onCreate().
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.3.0")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")

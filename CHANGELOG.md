@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 — Startup crash fix
+
+- Added the Kotlin standard library as an explicit runtime dependency.
+- Fixed the startup crash reporting `NoClassDefFoundError: kotlin.jvm.functions.Function0` in standalone APK installs.
+
 ## 0.2.1 — Quick Customer branding
 
 - Renamed the visible application brand from Chai Duniya to Quick Customer.
