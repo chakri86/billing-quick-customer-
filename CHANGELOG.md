@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 — Generic Bluetooth ESC/POS printing
+
+- Added paired Bluetooth-printer selection with Android 12+ Nearby devices permission handling.
+- Added generic RFCOMM/SPP ESC/POS connection support with secure and insecure socket fallbacks.
+- Added separate 58 mm and 80 mm receipt layouts.
+- Added a printer test page and optional automatic printing after payment.
+- Added manual printing from the successful-payment receipt.
+- Added reprinting from complete historical bill details, including a cancelled-copy marker.
+- Added a Room 3-to-4 migration that preserves existing local data and printer preferences.
+- Added receipt-formatter unit tests and retained the approved Quick Customer launcher icon.
+
 ## 0.3.2 — Quick Customer launcher icon
 
 - Replaced the generic Android launcher icon with the approved Quick Customer Q-and-receipt logo.

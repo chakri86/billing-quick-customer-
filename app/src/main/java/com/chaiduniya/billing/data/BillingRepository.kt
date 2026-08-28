@@ -172,6 +172,10 @@ class BillingRepository(private val db: AppDatabase) {
             id = 1,
             shopName = settings.shopName.trim().ifBlank { "Quick Customer" },
             taxRateBps = settings.taxRateBps.coerceIn(0, 10_000),
+            printerName = settings.printerName.trim(),
+            printerAddress = settings.printerAddress.trim().uppercase(Locale.US),
+            printerPaperWidthMm = if (settings.printerPaperWidthMm >= 80) 80 else 58,
+            printerAutoPrint = settings.printerEnabled && settings.printerAutoPrint,
             updatedAt = System.currentTimeMillis()
         )
         db.settingsDao().save(safe)

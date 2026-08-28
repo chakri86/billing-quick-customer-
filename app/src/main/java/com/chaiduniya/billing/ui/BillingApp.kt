@@ -2,9 +2,13 @@
 
 package com.chaiduniya.billing.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -47,10 +51,13 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PointOfSale
+import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Settings
@@ -112,6 +119,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.chaiduniya.billing.data.BillDetails
 import com.chaiduniya.billing.data.CartLine
 import com.chaiduniya.billing.data.PaymentMethod
@@ -129,6 +137,7 @@ import java.util.Locale
 
 @Composable
 fun BillingApp(viewModel: BillingViewModel) {
+    val printerSettings by viewModel.settings.collectAsState()
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         val user = viewModel.currentUser
         when {
@@ -149,8 +158,34 @@ fun BillingApp(viewModel: BillingViewModel) {
             text = { Text(message) }
         )
     }
-    viewModel.lastReceipt?.let { ReceiptDialog(it, viewModel::dismissReceipt) }
-    viewModel.selectedBillDetails?.let { BillDetailsDialog(it, viewModel::dismissBillDetails) }
+    viewModel.lastReceipt?.let { receipt ->
+        ReceiptDialog(
+            receipt = receipt,
+            canPrint = printerSettings.printerEnabled && printerSettings.printerAddress.isNotBlank(),
+            isPrinting = viewModel.isPrinting,
+            onPrint = { viewModel.printReceipt(receipt) },
+            onDismiss = viewModel::dismissReceipt
+        )
+    }
+    viewModel.selectedBillDetails?.let { details ->
+        BillDetailsDialog(
+            details = details,
+            canPrint = printerSettings.printerEnabled && printerSettings.printerAddress.isNotBlank(),
+            isPrinting = viewModel.isPrinting,
+            onPrint = { viewModel.printBill(details) },
+            onDismiss = viewModel::dismissBillDetails
+        )
+    }
+    viewModel.printerMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissPrinterMessage,
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissPrinterMessage) { Text("OK") }
+            },
+            title = { Text("Printer") },
+            text = { Text(message) }
+        )
+    }
 }
 
 @Composable
@@ -739,7 +774,13 @@ private fun QrCodeImage(uriString: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ReceiptDialog(receipt: Receipt, onDismiss: () -> Unit) {
+private fun ReceiptDialog(
+    receipt: Receipt,
+    canPrint: Boolean,
+    isPrinting: Boolean,
+    onPrint: () -> Unit,
+    onDismiss: () -> Unit
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Payment successful") },
@@ -797,7 +838,16 @@ private fun ReceiptDialog(receipt: Receipt, onDismiss: () -> Unit) {
                 Text("Saved locally • waiting for cloud sync", style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = { Button(onClick = onDismiss) { Text("New bill") } }
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onPrint, enabled = canPrint && !isPrinting) {
+                    Icon(Icons.Default.Print, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (isPrinting) "Printing…" else "Print")
+                }
+                Button(onClick = onDismiss) { Text("New bill") }
+            }
+        }
     )
 }
 
@@ -952,7 +1002,13 @@ private fun SaleRow(
 }
 
 @Composable
-private fun BillDetailsDialog(details: BillDetails, onDismiss: () -> Unit) {
+private fun BillDetailsDialog(
+    details: BillDetails,
+    canPrint: Boolean,
+    isPrinting: Boolean,
+    onPrint: () -> Unit,
+    onDismiss: () -> Unit
+) {
     val sale = details.sale
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1023,7 +1079,16 @@ private fun BillDetailsDialog(details: BillDetails, onDismiss: () -> Unit) {
                 )
             }
         },
-        confirmButton = { Button(onClick = onDismiss) { Text("Close") } }
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onPrint, enabled = canPrint && !isPrinting) {
+                    Icon(Icons.Default.Print, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (isPrinting) "Printing…" else "Reprint")
+                }
+                Button(onClick = onDismiss) { Text("Close") }
+            }
+        }
     )
 }
 
@@ -1209,7 +1274,20 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
     var pricesIncludeTax by remember(settings.updatedAt) { mutableStateOf(settings.pricesIncludeTax) }
     var receiptFooter by remember(settings.updatedAt) { mutableStateOf(settings.receiptFooter) }
     var printerEnabled by remember(settings.updatedAt) { mutableStateOf(settings.printerEnabled) }
+    var printerName by remember(settings.updatedAt) { mutableStateOf(settings.printerName) }
+    var printerAddress by remember(settings.updatedAt) { mutableStateOf(settings.printerAddress) }
+    var printerPaperWidthMm by remember(settings.updatedAt) { mutableStateOf(settings.printerPaperWidthMm) }
+    var printerAutoPrint by remember(settings.updatedAt) { mutableStateOf(settings.printerAutoPrint) }
     var upiQrImageUri by remember(settings.updatedAt) { mutableStateOf(settings.upiQrImageUri) }
+    var bluetoothPermissionGranted by remember {
+        mutableStateOf(hasBluetoothConnectPermission(context))
+    }
+    val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        bluetoothPermissionGranted = granted
+        if (granted) viewModel.refreshPairedPrinters()
+    }
     val qrImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching {
@@ -1222,7 +1300,9 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
         }
     }
     val parsedTaxBps = ((taxRate.toDoubleOrNull() ?: 0.0) * 100).toInt().coerceIn(0, 10_000)
-    val valid = shopName.isNotBlank() && (!taxEnabled || parsedTaxBps > 0)
+    val valid = shopName.isNotBlank() &&
+        (!taxEnabled || parsedTaxBps > 0) &&
+        (!printerEnabled || printerAddress.isNotBlank())
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
@@ -1293,12 +1373,123 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
         }
 
         OutlinedCard(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingToggle(
                     "Bluetooth receipt printer",
-                    "Stores the owner preference. Physical ESC/POS connection arrives in the printer milestone.",
+                    "Use a paired generic ESC/POS Bluetooth printer.",
                     printerEnabled
                 ) { printerEnabled = it }
+                if (printerEnabled) {
+                    if (!bluetoothPermissionGranted) {
+                        Text(
+                            "Quick Customer needs Nearby devices permission to connect to the printer.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Button(
+                            onClick = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                                } else {
+                                    bluetoothPermissionGranted = true
+                                    viewModel.refreshPairedPrinters()
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.Bluetooth, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Allow Bluetooth")
+                        }
+                    } else {
+                        Text("Paper width", fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(58, 80).forEach { width ->
+                                FilterChip(
+                                    selected = printerPaperWidthMm == width,
+                                    onClick = { printerPaperWidthMm = width },
+                                    label = { Text("$width mm") }
+                                )
+                            }
+                        }
+
+                        Text("Paired printer", fontWeight = FontWeight.SemiBold)
+                        if (viewModel.pairedPrinters.isEmpty()) {
+                            Text(
+                                "No paired printers loaded. Pair the printer in Android Bluetooth settings, then refresh.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        viewModel.pairedPrinters.forEach { printer ->
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clickable {
+                                        printerName = printer.name
+                                        printerAddress = printer.address
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = printerAddress.equals(printer.address, ignoreCase = true),
+                                    onClick = {
+                                        printerName = printer.name
+                                        printerAddress = printer.address
+                                    }
+                                )
+                                Column {
+                                    Text(printer.name, fontWeight = FontWeight.Medium)
+                                    Text(printer.address, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                        if (printerAddress.isNotBlank() &&
+                            viewModel.pairedPrinters.none { it.address.equals(printerAddress, ignoreCase = true) }
+                        ) {
+                            Text("Selected: ${printerName.ifBlank { "Bluetooth printer" }} • $printerAddress")
+                        } else if (printerAddress.isBlank()) {
+                            Text(
+                                "Select a printer before saving.",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = viewModel::refreshPairedPrinters) {
+                                Icon(Icons.Default.Refresh, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Refresh")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    context.startActivity(Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS))
+                                }
+                            ) { Text("Pair in Android settings") }
+                            Button(
+                                onClick = {
+                                    viewModel.testPrinter(
+                                        settings.copy(
+                                            printerEnabled = true,
+                                            printerName = printerName,
+                                            printerAddress = printerAddress,
+                                            printerPaperWidthMm = printerPaperWidthMm,
+                                            printerAutoPrint = printerAutoPrint
+                                        )
+                                    )
+                                },
+                                enabled = printerAddress.isNotBlank() && !viewModel.isPrinting
+                            ) {
+                                Icon(Icons.Default.Print, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (viewModel.isPrinting) "Printing…" else "Test print")
+                            }
+                        }
+
+                        SettingToggle(
+                            "Print automatically",
+                            "Print the receipt immediately after a successful payment.",
+                            printerAutoPrint
+                        ) { printerAutoPrint = it }
+                    }
+                }
             }
         }
 
@@ -1314,6 +1505,10 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
                         pricesIncludeTax = pricesIncludeTax,
                         receiptFooter = receiptFooter.trim(),
                         printerEnabled = printerEnabled,
+                        printerName = printerName,
+                        printerAddress = printerAddress,
+                        printerPaperWidthMm = printerPaperWidthMm,
+                        printerAutoPrint = printerEnabled && printerAutoPrint,
                         upiQrImageUri = upiQrImageUri
                     )
                 )
@@ -1349,3 +1544,8 @@ private fun UserRole.displayName(): String = when (this) {
 
 private fun formatDate(epoch: Long): String =
     SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(epoch))
+
+private fun hasBluetoothConnectPermission(context: android.content.Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
+        PackageManager.PERMISSION_GRANTED

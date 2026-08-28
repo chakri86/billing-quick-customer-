@@ -111,6 +111,10 @@ data class ShopSettingsEntity(
     val pricesIncludeTax: Boolean = true,
     val receiptFooter: String = "Thank you. Visit again!",
     val printerEnabled: Boolean = false,
+    @ColumnInfo(defaultValue = "''") val printerName: String = "",
+    @ColumnInfo(defaultValue = "''") val printerAddress: String = "",
+    @ColumnInfo(defaultValue = "58") val printerPaperWidthMm: Int = 58,
+    @ColumnInfo(defaultValue = "0") val printerAutoPrint: Boolean = false,
     @ColumnInfo(defaultValue = "''") val upiQrImageUri: String = "",
     val updatedAt: Long = System.currentTimeMillis()
 )

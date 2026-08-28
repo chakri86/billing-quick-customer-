@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.3.2
+## Included in version 0.4.0
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -17,7 +17,10 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Owner-uploaded, replaceable UPI QR image shown during UPI payment
 - Separate card-terminal payment confirmation
 - Admin/Super User discounts with tax-inclusive or tax-exclusive calculation
-- Super User shop, receipt, tax, and printer-preference settings
+- Super User shop, receipt, tax, and Bluetooth-printer settings
+- Generic ESC/POS Bluetooth printing through already paired printers
+- 58 mm and 80 mm paper formatting
+- Test printing, optional automatic printing, and historical-bill reprinting
 - Admin/Super User completed-bill cancellation with a required reason
 - Persistent cancellation and settings audit records
 - Transaction-safe sales and sale-item storage
@@ -27,16 +30,16 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Custom Quick Customer launcher icon for phones and tablets
 - Cash/UPI/Card, discount, tax, cancellation, and top-product summaries
 - Pending-sync status and future multi-shop identifiers
-- Versioned Room migrations from the 0.1 and 0.2 databases
-- Unit tests for permissions, billing calculations, totals, and menu completeness
+- Versioned Room migrations that preserve existing users, settings, products, and bills
+- Unit tests for permissions, billing calculations, totals, menu completeness, and receipt formatting
 
-Cloud API synchronization and real ESC/POS Bluetooth printing are intentionally scheduled after the local billing core is accepted. The printer switch in Settings stores the owner's preference but does not connect to hardware yet. Bills are already marked with sync state, business ID, shop ID, and device ID so cloud sync does not require a database redesign.
+Cloud API synchronization is scheduled after the local billing and printer workflows are accepted. Bills are already marked with sync state, business ID, shop ID, and device ID so cloud sync does not require a database redesign.
 
 ## Open in Android Studio
 
 1. Extract the project ZIP.
 2. In Android Studio, select **Open**.
-3. Choose the `chai-duniya-billing` folder.
+3. Choose the folder containing `app` and `settings.gradle.kts`.
 4. Allow Gradle synchronization to finish.
 5. Confirm **SDK Platform 36** and **JDK 17** are selected.
 6. Start a phone/tablet emulator or connect the Samsung SM-P615.
@@ -57,6 +60,19 @@ A fresh installation asks the shop owner to create the first Super User username
 - 12-inch tablet: API 36
 
 Test both portrait and landscape orientation. Bluetooth printer validation requires a physical device and printer.
+
+## Configure a generic Bluetooth printer
+
+1. Pair the printer in the tablet or phone's Android Bluetooth settings.
+2. Sign in as the Super User.
+3. Open **Settings → Bluetooth receipt printer**.
+4. Enable printing and allow the Nearby devices permission.
+5. Select **58 mm** or **80 mm** paper.
+6. Tap **Refresh** and select the paired printer.
+7. Tap **Test print**.
+8. Optionally enable **Print automatically**, then save the settings.
+
+The implementation uses the common Bluetooth Classic ESC/POS Serial Port Profile. Hardware pairing and final paper alignment must be tested on the physical device; the Android emulator cannot validate a real Bluetooth printer.
 
 ## Useful commands
 

@@ -130,7 +130,7 @@ interface AuditDao {
         ShopSettingsEntity::class,
         AuditLogEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 @TypeConverters(DbConverters::class)
@@ -149,7 +149,7 @@ abstract class AppDatabase : RoomDatabase() {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "chai-duniya-billing.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
                 .also { instance = it }
         }
@@ -203,6 +203,15 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE sales ADD COLUMN cashReceivedPaise INTEGER")
                 db.execSQL("ALTER TABLE sales ADD COLUMN changeReturnedPaise INTEGER")
                 db.execSQL("ALTER TABLE shop_settings ADD COLUMN upiQrImageUri TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE shop_settings ADD COLUMN printerName TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE shop_settings ADD COLUMN printerAddress TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE shop_settings ADD COLUMN printerPaperWidthMm INTEGER NOT NULL DEFAULT 58")
+                db.execSQL("ALTER TABLE shop_settings ADD COLUMN printerAutoPrint INTEGER NOT NULL DEFAULT 0")
             }
         }
     }
