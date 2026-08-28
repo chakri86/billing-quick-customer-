@@ -94,7 +94,7 @@ object EscPosReceiptFormatter {
     }
 
     private fun ByteArrayOutputStream.wrapped(value: String, width: Int) {
-        wrap(ascii(value), width).forEach(::text)
+        wrap(ascii(value), width).forEach { line -> text(line) }
     }
 
     private fun ByteArrayOutputStream.pair(left: String, right: String, width: Int) {
