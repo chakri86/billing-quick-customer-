@@ -20,6 +20,9 @@ import com.chaiduniya.billing.data.UserEntity
 import com.chaiduniya.billing.data.UserRole
 import com.chaiduniya.billing.domain.AccessPolicy
 import com.chaiduniya.billing.domain.AppPermission
+import com.chaiduniya.billing.printing.BluetoothPrinterManager
+import com.chaiduniya.billing.printing.PairedBluetoothPrinter
+import com.chaiduniya.billing.printing.PrintableReceipt
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -36,6 +39,7 @@ enum class AppSection(val label: String) {
 
 class BillingViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = (application as ChaiDuniyaApplication).repository
+    private val printerManager = BluetoothPrinterManager(application.applicationContext)
 
     val products: StateFlow<List<ProductEntity>> = repository.products.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
@@ -72,6 +76,10 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         private set
     var operationError by mutableStateOf<String?>(null)
         private set
+    var printerMessage by mutableStateOf<String?>(null)
+        private set
+    var pairedPrinters by mutableStateOf<List<PairedBluetoothPrinter>>(emptyList())
+        private set
     var lastReceipt by mutableStateOf<Receipt?>(null)
         private set
     var selectedBillDetails by mutableStateOf<BillDetails?>(null)
@@ -79,6 +87,8 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     var isLoadingBill by mutableStateOf(false)
         private set
     var isSaving by mutableStateOf(false)
+        private set
+    var isPrinting by mutableStateOf(false)
         private set
 
     private val quantities = mutableStateMapOf<String, Int>()
@@ -182,6 +192,10 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
                 .onSuccess {
                     quantities.clear()
                     lastReceipt = it
+                    val printerSettings = settings.value
+                    if (printerSettings.printerEnabled && printerSettings.printerAutoPrint) {
+                        printReceipt(it, showSuccess = false)
+                    }
                 }
                 .onFailure { operationError = it.message ?: "The bill could not be saved." }
             isSaving = false
@@ -206,6 +220,33 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
     fun dismissBillDetails() { selectedBillDetails = null }
     fun dismissError() { operationError = null }
+    fun dismissPrinterMessage() { printerMessage = null }
+
+    fun refreshPairedPrinters() {
+        runCatching { printerManager.pairedPrinters() }
+            .onSuccess { pairedPrinters = it }
+            .onFailure {
+                pairedPrinters = emptyList()
+                operationError = it.message ?: "Paired printers could not be loaded."
+            }
+    }
+
+    fun testPrinter(settings: ShopSettingsEntity) {
+        runPrinterJob("Printer test completed.") { printerManager.printTest(settings) }
+    }
+
+    fun printReceipt(receipt: Receipt, showSuccess: Boolean = true) {
+        val success = if (showSuccess) "Receipt printed successfully." else null
+        runPrinterJob(success) {
+            printerManager.print(PrintableReceipt.from(receipt), receipt.settings)
+        }
+    }
+
+    fun printBill(details: BillDetails) {
+        runPrinterJob("Receipt printed successfully.") {
+            printerManager.print(PrintableReceipt.from(details), settings.value)
+        }
+    }
 
     fun saveProduct(existing: ProductEntity?, name: String, category: String, priceRupees: Long) {
         if (!hasPermission(AppPermission.MANAGE_PRODUCTS)) return
@@ -256,6 +297,23 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             runCatching { repository.saveSettings(settings, actor) }
                 .onFailure { operationError = it.message ?: "Settings could not be saved." }
+        }
+    }
+
+    private fun runPrinterJob(successMessage: String?, action: suspend () -> Unit) {
+        if (isPrinting) {
+            operationError = "A print job is already running."
+            return
+        }
+        isPrinting = true
+        operationError = null
+        viewModelScope.launch {
+            runCatching { action() }
+                .onSuccess { if (successMessage != null) printerMessage = successMessage }
+                .onFailure { failure ->
+                    operationError = failure.message ?: "The receipt could not be printed."
+                }
+            isPrinting = false
         }
     }
 
