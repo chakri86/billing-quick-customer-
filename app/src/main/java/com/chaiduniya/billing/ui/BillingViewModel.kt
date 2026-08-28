@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.chaiduniya.billing.ChaiDuniyaApplication
+import com.chaiduniya.billing.data.BillDetails
 import com.chaiduniya.billing.data.CartLine
 import com.chaiduniya.billing.data.PaymentMethod
 import com.chaiduniya.billing.data.ProductEntity
@@ -63,11 +64,19 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         private set
     var authReady by mutableStateOf(false)
         private set
+    var needsOwnerSetup by mutableStateOf(false)
+        private set
     var loginError by mutableStateOf<String?>(null)
+        private set
+    var ownerSetupError by mutableStateOf<String?>(null)
         private set
     var operationError by mutableStateOf<String?>(null)
         private set
     var lastReceipt by mutableStateOf<Receipt?>(null)
+        private set
+    var selectedBillDetails by mutableStateOf<BillDetails?>(null)
+        private set
+    var isLoadingBill by mutableStateOf(false)
         private set
     var isSaving by mutableStateOf(false)
         private set
@@ -78,9 +87,25 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             runCatching { repository.ensureSeeded() }
                 .onFailure { operationError = it.message ?: "Could not initialize local data." }
+            needsOwnerSetup = runCatching { !repository.hasUsers() }.getOrDefault(false)
             authReady = true
         }
     }
+
+    fun createInitialOwner(username: String, displayName: String, password: String) {
+        if (!authReady || !needsOwnerSetup) return
+        ownerSetupError = null
+        viewModelScope.launch {
+            runCatching { repository.createInitialOwner(username, displayName, password) }
+                .onSuccess { owner ->
+                    currentUser = owner
+                    needsOwnerSetup = false
+                }
+                .onFailure { ownerSetupError = it.message ?: "Owner account could not be created." }
+        }
+    }
+
+    fun clearOwnerSetupError() { ownerSetupError = null }
 
     fun login(username: String, password: String) {
         if (!authReady) return
@@ -98,6 +123,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         currentSection = AppSection.BILLING
         quantities.clear()
         lastReceipt = null
+        selectedBillDetails = null
     }
 
     fun selectSection(section: AppSection) {
@@ -163,6 +189,22 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun dismissReceipt() { lastReceipt = null }
+    fun openBill(sale: SaleEntity) {
+        val user = currentUser ?: return
+        if (user.role == UserRole.EMPLOYEE && sale.cashierId != user.id) {
+            operationError = "Employees can view only their own bills."
+            return
+        }
+        if (isLoadingBill) return
+        isLoadingBill = true
+        viewModelScope.launch {
+            runCatching { repository.billDetails(sale, settings.value) }
+                .onSuccess { selectedBillDetails = it }
+                .onFailure { operationError = it.message ?: "Bill details could not be opened." }
+            isLoadingBill = false
+        }
+    }
+    fun dismissBillDetails() { selectedBillDetails = null }
     fun dismissError() { operationError = null }
 
     fun saveProduct(existing: ProductEntity?, name: String, category: String, priceRupees: Long) {

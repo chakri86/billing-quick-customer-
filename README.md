@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.3.0
+## Included in version 0.3.2
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -23,6 +23,8 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Transaction-safe sales and sale-item storage
 - Price/name snapshots so historical bills never change
 - Role-filtered sales history with Today, 7-day, 30-day, and all-time totals
+- Tappable historical bills with full receipt, payment, cancellation, and sync details
+- Custom Quick Customer launcher icon for phones and tablets
 - Cash/UPI/Card, discount, tax, cancellation, and top-product summaries
 - Pending-sync status and future multi-shop identifiers
 - Versioned Room migrations from the 0.1 and 0.2 databases
@@ -42,15 +44,9 @@ Cloud API synchronization and real ESC/POS Bluetooth printing are intentionally 
 
 The first build downloads Android and Kotlin dependencies and can take several minutes.
 
-## Demo accounts
+## First-run owner setup
 
-| Role | Username | Password |
-|---|---|---|
-| Super User | `owner` | `Owner@123` |
-| Admin | `admin` | `Admin@123` |
-| Employee | `cashier` | `Cashier@123` |
-
-These credentials are test data only and must be replaced before a production release.
+A fresh installation asks the shop owner to create the first Super User username and password. No default credentials, password hashes, or password salts are published in this repository. The Super User can then create Admin and Employee accounts from the Users screen. Existing installations retain their current users and local bills.
 
 ## Recommended emulator matrix
 

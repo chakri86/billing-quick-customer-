@@ -22,15 +22,6 @@ class BillingRepository(private val db: AppDatabase) {
     val auditLogs: Flow<List<AuditLogEntity>> = db.auditDao().observeAll()
 
     suspend fun ensureSeeded() = db.withTransaction {
-        if (db.userDao().count() == 0) {
-            db.userDao().insertAll(
-                listOf(
-                    newUser("owner", "Shop Owner", UserRole.SUPER_USER, "Owner@123"),
-                    newUser("admin", "Shop Manager", UserRole.ADMIN, "Admin@123"),
-                    newUser("cashier", "Cashier", UserRole.EMPLOYEE, "Cashier@123")
-                )
-            )
-        }
         if (db.productDao().count() == 0) {
             db.productDao().insertAll(SeedData.products())
         } else {
@@ -44,6 +35,22 @@ class BillingRepository(private val db: AppDatabase) {
         }
         if (db.settingsDao().count() == 0) db.settingsDao().save(ShopSettingsEntity())
         else db.settingsDao().renameDefaultShop("Chai Duniya", "Quick Customer", System.currentTimeMillis())
+    }
+
+    suspend fun hasUsers(): Boolean = db.userDao().count() > 0
+
+    suspend fun createInitialOwner(
+        username: String,
+        displayName: String,
+        password: String
+    ): UserEntity = db.withTransaction {
+        require(username.trim().length >= 3) { "Username must contain at least 3 characters." }
+        require(displayName.isNotBlank()) { "Display name is required." }
+        require(password.length >= 8) { "Password must contain at least 8 characters." }
+        check(db.userDao().count() == 0) { "An owner account already exists." }
+        val owner = newUser(username.trim(), displayName.trim(), UserRole.SUPER_USER, password)
+        db.userDao().insert(owner)
+        owner
     }
 
     suspend fun authenticate(username: String, password: String): UserEntity? {
@@ -76,6 +83,9 @@ class BillingRepository(private val db: AppDatabase) {
     suspend fun updateProduct(product: ProductEntity) = db.productDao().update(
         product.copy(updatedAt = System.currentTimeMillis(), syncStatus = SyncStatus.PENDING)
     )
+
+    suspend fun billDetails(sale: SaleEntity, settings: ShopSettingsEntity): BillDetails =
+        BillDetails(sale, db.saleDao().itemsForSale(sale.id), settings)
 
     suspend fun completeSale(
         cashier: UserEntity,

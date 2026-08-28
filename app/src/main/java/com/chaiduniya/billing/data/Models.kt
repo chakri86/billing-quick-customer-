@@ -94,6 +94,12 @@ data class Receipt(
     val settings: ShopSettingsEntity
 )
 
+data class BillDetails(
+    val sale: SaleEntity,
+    val items: List<SaleItemEntity>,
+    val settings: ShopSettingsEntity
+)
+
 @Entity(tableName = "shop_settings")
 data class ShopSettingsEntity(
     @PrimaryKey val id: Int = 1,

@@ -112,6 +112,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.chaiduniya.billing.data.BillDetails
 import com.chaiduniya.billing.data.CartLine
 import com.chaiduniya.billing.data.PaymentMethod
 import com.chaiduniya.billing.data.ProductEntity
@@ -130,7 +131,14 @@ import java.util.Locale
 fun BillingApp(viewModel: BillingViewModel) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         val user = viewModel.currentUser
-        if (user == null) LoginScreen(viewModel) else AppShell(viewModel, user)
+        when {
+            !viewModel.authReady -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            viewModel.needsOwnerSetup -> InitialOwnerSetupScreen(viewModel)
+            user == null -> LoginScreen(viewModel)
+            else -> AppShell(viewModel, user)
+        }
     }
 
     viewModel.operationError?.let { message ->
@@ -142,6 +150,87 @@ fun BillingApp(viewModel: BillingViewModel) {
         )
     }
     viewModel.lastReceipt?.let { ReceiptDialog(it, viewModel::dismissReceipt) }
+    viewModel.selectedBillDetails?.let { BillDetailsDialog(it, viewModel::dismissBillDetails) }
+}
+
+@Composable
+private fun InitialOwnerSetupScreen(viewModel: BillingViewModel) {
+    var username by remember { mutableStateOf("") }
+    var displayName by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
+    val valid = username.length >= 3 && displayName.isNotBlank() &&
+        password.length >= 8 && password == confirmPassword
+
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(24.dp).widthIn(max = 520.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Icon(Icons.Default.Storefront, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+                Text("Create Shop Owner", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "Set up the first Super User for this device. No default password is included.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    username,
+                    { username = it.filterNot(Char::isWhitespace); viewModel.clearOwnerSetupError() },
+                    label = { Text("Owner username") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    displayName,
+                    { displayName = it; viewModel.clearOwnerSetupError() },
+                    label = { Text("Owner display name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    password,
+                    { password = it; viewModel.clearOwnerSetupError() },
+                    label = { Text("Password (minimum 8 characters)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    leadingIcon = { Icon(Icons.Default.Lock, null) },
+                    trailingIcon = {
+                        IconButton(onClick = { showPassword = !showPassword }) {
+                            Icon(if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility, null)
+                        }
+                    }
+                )
+                OutlinedTextField(
+                    confirmPassword,
+                    { confirmPassword = it; viewModel.clearOwnerSetupError() },
+                    label = { Text("Confirm password") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation()
+                )
+                if (confirmPassword.isNotEmpty() && password != confirmPassword) {
+                    Text("Passwords do not match.", color = MaterialTheme.colorScheme.error)
+                }
+                viewModel.ownerSetupError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                Button(
+                    onClick = { viewModel.createInitialOwner(username, displayName, password) },
+                    enabled = valid,
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                ) {
+                    Text("Create owner and continue")
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -202,7 +291,7 @@ private fun LoginScreen(viewModel: BillingViewModel) {
                     else Text("Sign in")
                 }
                 Text(
-                    "Demo: owner / Owner@123  •  admin / Admin@123  •  cashier / Cashier@123",
+                    "Use the credentials provided by the shop owner.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -774,7 +863,12 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
                 }
             }
             items(sales, key = { it.id }) { sale ->
-                SaleRow(sale, canCancel = user.role != UserRole.EMPLOYEE, onCancel = { cancelling = sale })
+                SaleRow(
+                    sale = sale,
+                    canCancel = user.role != UserRole.EMPLOYEE,
+                    onOpen = { viewModel.openBill(sale) },
+                    onCancel = { cancelling = sale }
+                )
             }
         }
     }
@@ -821,9 +915,14 @@ private fun SummaryCard(label: String, value: String, modifier: Modifier = Modif
 }
 
 @Composable
-private fun SaleRow(sale: SaleEntity, canCancel: Boolean, onCancel: () -> Unit) {
+private fun SaleRow(
+    sale: SaleEntity,
+    canCancel: Boolean,
+    onOpen: () -> Unit,
+    onCancel: () -> Unit
+) {
     OutlinedCard(
-        Modifier.fillMaxWidth(),
+        Modifier.fillMaxWidth().clickable(onClick = onOpen),
         colors = CardDefaults.outlinedCardColors(
             containerColor = if (sale.isCancelled) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surface
         )
@@ -838,6 +937,7 @@ private fun SaleRow(sale: SaleEntity, canCancel: Boolean, onCancel: () -> Unit) 
             supportingContent = {
                 Column {
                     Text("${formatDate(sale.createdAt)} • ${sale.cashierName} • ${sale.paymentMethod.name}")
+                    Text("Tap to view bill details", style = MaterialTheme.typography.bodySmall)
                     sale.cancellationReason?.let { Text("Reason: $it", color = MaterialTheme.colorScheme.error) }
                 }
             },
@@ -848,6 +948,91 @@ private fun SaleRow(sale: SaleEntity, canCancel: Boolean, onCancel: () -> Unit) 
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun BillDetailsDialog(details: BillDetails, onDismiss: () -> Unit) {
+    val sale = details.sale
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Bill details") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(details.settings.shopName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (details.settings.address.isNotBlank()) Text(details.settings.address)
+                if (details.settings.phone.isNotBlank()) Text(details.settings.phone)
+
+                Divider(Modifier.padding(vertical = 4.dp))
+                Text(sale.invoiceNumber, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(formatDate(sale.createdAt))
+                Text("Status: ${if (sale.isCancelled) "CANCELLED" else "COMPLETED"}", fontWeight = FontWeight.Bold)
+                Text("Cashier: ${sale.cashierName}")
+                Text("Payment: ${sale.paymentMethod.name}")
+
+                Divider(Modifier.padding(vertical = 4.dp))
+                Text("Items", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                if (details.items.isEmpty()) {
+                    Text("No line items were found for this bill.", color = MaterialTheme.colorScheme.error)
+                } else {
+                    details.items.forEach { item ->
+                        Column(Modifier.fillMaxWidth()) {
+                            Row(Modifier.fillMaxWidth()) {
+                                Text("${item.quantity} × ${item.productNameSnapshot}", Modifier.weight(1f))
+                                Text(Money.format(item.lineTotalPaise), fontWeight = FontWeight.SemiBold)
+                            }
+                            Text(
+                                "${Money.format(item.unitPricePaise)} each",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                Divider(Modifier.padding(vertical = 4.dp))
+                BillAmountRow("Subtotal", sale.subtotalPaise)
+                if (sale.discountPaise > 0) BillAmountRow("Discount", -sale.discountPaise)
+                if (sale.taxPaise > 0) BillAmountRow("Tax", sale.taxPaise)
+                BillAmountRow("Total", sale.totalPaise, bold = true)
+
+                if (sale.paymentMethod == PaymentMethod.CASH) {
+                    sale.cashReceivedPaise?.let { BillAmountRow("Cash received", it) }
+                    sale.changeReturnedPaise?.let { BillAmountRow("Change returned", it, bold = true) }
+                }
+
+                if (sale.isCancelled) {
+                    Divider(Modifier.padding(vertical = 4.dp))
+                    Text("Cancellation", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    sale.cancelledAt?.let { Text("Cancelled: ${formatDate(it)}") }
+                    sale.cancelledByName?.let { Text("Cancelled by: $it") }
+                    sale.cancellationReason?.let { Text("Reason: $it") }
+                }
+
+                Divider(Modifier.padding(vertical = 4.dp))
+                Text(
+                    when (sale.syncStatus.name) {
+                        "SYNCED" -> "Cloud status: Synchronized"
+                        "FAILED" -> "Cloud status: Synchronization failed"
+                        else -> "Cloud status: Saved locally, waiting for synchronization"
+                    },
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        },
+        confirmButton = { Button(onClick = onDismiss) { Text("Close") } }
+    )
+}
+
+@Composable
+private fun BillAmountRow(label: String, amountPaise: Long, bold: Boolean = false) {
+    Row(Modifier.fillMaxWidth()) {
+        Text(label, Modifier.weight(1f), fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal)
+        val amount = if (amountPaise < 0) "−${Money.format(-amountPaise)}" else Money.format(amountPaise)
+        Text(amount, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal)
     }
 }
 

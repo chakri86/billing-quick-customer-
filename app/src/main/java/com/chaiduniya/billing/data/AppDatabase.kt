@@ -66,6 +66,8 @@ interface ProductDao {
 interface SaleDao {
     @Query("SELECT * FROM sales ORDER BY createdAt DESC") fun observeAll(): Flow<List<SaleEntity>>
     @Query("SELECT COUNT(*) FROM sales WHERE syncStatus != 'SYNCED'") fun observePendingCount(): Flow<Int>
+    @Query("SELECT * FROM sale_items WHERE saleId = :saleId ORDER BY rowid")
+    suspend fun itemsForSale(saleId: String): List<SaleItemEntity>
     @Query(
         """
         SELECT si.productNameSnapshot AS productName,

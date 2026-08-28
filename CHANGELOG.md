@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.2 — Quick Customer launcher icon
+
+- Replaced the generic Android launcher icon with the approved Quick Customer Q-and-receipt logo.
+- Added standard and round launcher assets across Android screen densities.
+- Added adaptive launcher icons for Android 8 and newer.
+- Added secure first-run Super User creation with no built-in credentials or password-derived values in source.
+
+## 0.3.1 — Historical bill details
+
+- Made every sales-history bill tappable.
+- Added a complete historical bill dialog with item snapshots, quantities, unit prices, totals, payment information, cash/change, cashier, cancellation, and synchronization status.
+- Kept employee access restricted to bills created by that employee.
+
 ## 0.3.0 — Guided payment flow
 
 - Replaced direct payment confirmation with a method-specific Proceed step.
