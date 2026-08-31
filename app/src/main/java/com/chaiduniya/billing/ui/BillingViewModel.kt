@@ -9,7 +9,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.chaiduniya.billing.ChaiDuniyaApplication
 import com.chaiduniya.billing.data.BillDetails
+import com.chaiduniya.billing.data.BillingCategories
 import com.chaiduniya.billing.data.CartLine
+import com.chaiduniya.billing.data.CategoryEntity
 import com.chaiduniya.billing.data.PaymentMethod
 import com.chaiduniya.billing.data.ProductEntity
 import com.chaiduniya.billing.data.Receipt
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 enum class AppSection(val label: String) {
     BILLING("Billing"),
@@ -42,6 +45,9 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     private val printerManager = BluetoothPrinterManager(application.applicationContext)
 
     val products: StateFlow<List<ProductEntity>> = repository.products.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+    val categories: StateFlow<List<CategoryEntity>> = repository.categories.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
     val users: StateFlow<List<UserEntity>> = repository.users.stateIn(
@@ -92,6 +98,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         private set
 
     private val quantities = mutableStateMapOf<String, Int>()
+    private val miscProducts = mutableStateMapOf<String, ProductEntity>()
 
     init {
         viewModelScope.launch {
@@ -132,6 +139,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         currentUser = null
         currentSection = AppSection.BILLING
         quantities.clear()
+        miscProducts.clear()
         lastReceipt = null
         selectedBillDetails = null
     }
@@ -149,7 +157,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
     fun selectCategory(category: String) { selectedCategory = category }
 
-    fun cartLines(): List<CartLine> = products.value.mapNotNull { product ->
+    fun cartLines(): List<CartLine> = (products.value + miscProducts.values).mapNotNull { product ->
         quantities[product.id]?.takeIf { it > 0 }?.let { CartLine(product, it) }
     }
 
@@ -162,10 +170,33 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
 
     fun decrement(product: ProductEntity) {
         val next = (quantities[product.id] ?: 0) - 1
-        if (next <= 0) quantities.remove(product.id) else quantities[product.id] = next
+        if (next <= 0) {
+            quantities.remove(product.id)
+            miscProducts.remove(product.id)
+        } else quantities[product.id] = next
     }
 
-    fun clearCart() = quantities.clear()
+    fun addMisc(pricePaise: Long, description: String) {
+        if (pricePaise <= 0) {
+            operationError = "Enter a Misc price greater than zero."
+            return
+        }
+        val id = "misc-${UUID.randomUUID()}"
+        val product = ProductEntity(
+            id = id,
+            category = BillingCategories.MISC,
+            name = description.trim().ifBlank { "Misc item" },
+            pricePaise = pricePaise,
+            sortOrder = Int.MAX_VALUE
+        )
+        miscProducts[id] = product
+        quantities[id] = 1
+    }
+
+    fun clearCart() {
+        quantities.clear()
+        miscProducts.clear()
+    }
 
     fun checkout(
         paymentMethod: PaymentMethod,
@@ -191,6 +222,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
             }
                 .onSuccess {
                     quantities.clear()
+                    miscProducts.clear()
                     lastReceipt = it
                     val printerSettings = settings.value
                     if (printerSettings.printerEnabled && printerSettings.printerAutoPrint) {
@@ -263,6 +295,23 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     fun toggleProduct(product: ProductEntity) {
         if (!hasPermission(AppPermission.MANAGE_PRODUCTS)) return
         viewModelScope.launch { repository.updateProduct(product.copy(isActive = !product.isActive)) }
+    }
+
+    fun deleteProduct(product: ProductEntity) {
+        if (!hasPermission(AppPermission.MANAGE_PRODUCTS)) return
+        quantities.remove(product.id)
+        viewModelScope.launch {
+            runCatching { repository.deleteProduct(product) }
+                .onFailure { operationError = it.message ?: "Product could not be removed." }
+        }
+    }
+
+    fun saveCategoryOrder(names: List<String>) {
+        if (!hasPermission(AppPermission.MANAGE_PRODUCTS)) return
+        viewModelScope.launch {
+            runCatching { repository.saveCategoryOrder(names) }
+                .onFailure { operationError = it.message ?: "Category order could not be saved." }
+        }
     }
 
     fun addUser(username: String, displayName: String, role: UserRole, password: String) {

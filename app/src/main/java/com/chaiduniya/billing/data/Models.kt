@@ -10,6 +10,10 @@ enum class UserRole { SUPER_USER, ADMIN, EMPLOYEE }
 enum class PaymentMethod { CASH, UPI, CARD }
 enum class SyncStatus { PENDING, SYNCED, FAILED }
 
+object BillingCategories {
+    const val MISC = "Misc"
+}
+
 @Entity(tableName = "users", indices = [Index(value = ["username"], unique = true)])
 data class UserEntity(
     @PrimaryKey val id: String,
@@ -30,6 +34,15 @@ data class ProductEntity(
     val pricePaise: Long,
     val sortOrder: Int,
     val isActive: Boolean = true,
+    @ColumnInfo(defaultValue = "0") val isDeleted: Boolean = false,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val syncStatus: SyncStatus = SyncStatus.PENDING
+)
+
+@Entity(tableName = "categories", indices = [Index(value = ["sortOrder"])])
+data class CategoryEntity(
+    @PrimaryKey val name: String,
+    val sortOrder: Int,
     val updatedAt: Long = System.currentTimeMillis(),
     val syncStatus: SyncStatus = SyncStatus.PENDING
 )
