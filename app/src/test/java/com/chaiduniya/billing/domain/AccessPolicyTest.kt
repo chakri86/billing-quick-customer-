@@ -23,9 +23,14 @@ class AccessPolicyTest {
     }
 
     @Test
-    fun employeeCanOnlyCreateBills() {
+    fun employeeCanBillAddExpensesAndViewStock() {
         assertTrue(AccessPolicy.allows(UserRole.EMPLOYEE, AppPermission.CREATE_BILL))
-        AppPermission.entries.filterNot { it == AppPermission.CREATE_BILL }.forEach { permission ->
+        assertTrue(AccessPolicy.allows(UserRole.EMPLOYEE, AppPermission.ADD_EXPENSE))
+        assertTrue(AccessPolicy.allows(UserRole.EMPLOYEE, AppPermission.VIEW_EXPENSES))
+        assertTrue(AccessPolicy.allows(UserRole.EMPLOYEE, AppPermission.VIEW_INVENTORY))
+        AppPermission.entries.filterNot {
+            it in setOf(AppPermission.CREATE_BILL, AppPermission.ADD_EXPENSE, AppPermission.VIEW_EXPENSES, AppPermission.VIEW_INVENTORY)
+        }.forEach { permission ->
             assertFalse(AccessPolicy.allows(UserRole.EMPLOYEE, permission))
         }
     }

@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -129,6 +130,7 @@ import com.chaiduniya.billing.data.BillDetails
 import com.chaiduniya.billing.data.BillingCategories
 import com.chaiduniya.billing.data.CartLine
 import com.chaiduniya.billing.data.PaymentMethod
+import com.chaiduniya.billing.data.ExpenseStatus
 import com.chaiduniya.billing.data.ProductEntity
 import com.chaiduniya.billing.data.Receipt
 import com.chaiduniya.billing.data.SaleEntity
@@ -347,6 +349,8 @@ private data class SectionItem(val section: AppSection, val icon: ImageVector)
 private fun sectionsFor(role: UserRole): List<SectionItem> = buildList {
     add(SectionItem(AppSection.BILLING, Icons.Default.PointOfSale))
     add(SectionItem(AppSection.SALES, Icons.Default.BarChart))
+    add(SectionItem(AppSection.EXPENSES, Icons.Default.ReceiptLong))
+    add(SectionItem(AppSection.INVENTORY, Icons.Default.Inventory2))
     if (role != UserRole.EMPLOYEE) add(SectionItem(AppSection.PRODUCTS, Icons.Default.Inventory2))
     if (role == UserRole.SUPER_USER) add(SectionItem(AppSection.USERS, Icons.Default.AdminPanelSettings))
     if (role == UserRole.SUPER_USER) add(SectionItem(AppSection.SETTINGS, Icons.Default.Settings))
@@ -430,6 +434,8 @@ private fun AppShell(viewModel: BillingViewModel, user: UserEntity) {
                 when (viewModel.currentSection) {
                     AppSection.BILLING -> BillingScreen(viewModel)
                     AppSection.SALES -> SalesScreen(viewModel, user)
+                    AppSection.EXPENSES -> ExpenseScreen(viewModel, user)
+                    AppSection.INVENTORY -> InventoryScreen(viewModel, user)
                     AppSection.PRODUCTS -> ProductsScreen(viewModel)
                     AppSection.USERS -> UsersScreen(viewModel)
                     AppSection.SETTINGS -> SettingsScreen(viewModel)
@@ -946,6 +952,8 @@ private fun ReceiptDialog(
 private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
     val allSales by viewModel.sales.collectAsState()
     val productSales by viewModel.productSales.collectAsState()
+    val productProfit by viewModel.productProfit.collectAsState()
+    val allExpenses by viewModel.expenses.collectAsState()
     var period by remember { mutableStateOf(ReportPeriod.TODAY) }
     val cutoff = period.cutoff(System.currentTimeMillis())
     val roleSales = if (user.role == UserRole.EMPLOYEE) allSales.filter { it.cashierId == user.id } else allSales
@@ -954,6 +962,9 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
     val total = validSales.sumOf { it.totalPaise }
     val discounts = validSales.sumOf { it.discountPaise }
     val taxes = validSales.sumOf { it.taxPaise }
+    val expenseTotal = allExpenses.filter {
+        it.status == ExpenseStatus.APPROVED && (cutoff == null || it.occurredAt >= cutoff)
+    }.sumOf { it.amountPaise }
     var cancelling by remember { mutableStateOf<SaleEntity?>(null) }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text(if (user.role == UserRole.EMPLOYEE) "My sales" else "Shop sales", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -984,6 +995,10 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
             item { SummaryCard("Discounts", Money.format(discounts), Modifier.width(150.dp)) }
             item { SummaryCard("Tax", Money.format(taxes), Modifier.width(150.dp)) }
             item { SummaryCard("Cancelled", sales.count { it.isCancelled }.toString(), Modifier.width(150.dp)) }
+            if (user.role != UserRole.EMPLOYEE) {
+                item { SummaryCard("Expenses", Money.format(expenseTotal), Modifier.width(150.dp)) }
+                item { SummaryCard("Net sales", Money.format(total - expenseTotal), Modifier.width(150.dp)) }
+            }
         }
         Spacer(Modifier.height(16.dp))
         if (sales.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No completed bills yet") }
@@ -998,6 +1013,16 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
                         supportingContent = { Text("${item.quantity} sold") },
                         trailingContent = { Text(Money.format(item.revenuePaise), fontWeight = FontWeight.SemiBold) }
                     )
+                }
+                if (productProfit.any { it.costConfiguredCount > 0 }) {
+                    item { Text("Product profit (all time)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp)) }
+                    items(productProfit.filter { it.costConfiguredCount > 0 }.take(8), key = { "profit-${it.productName}" }) { item ->
+                        ListItem(
+                            headlineContent = { Text(item.productName) },
+                            supportingContent = { Text(if (item.costConfiguredCount == item.lineCount) "Cost fully configured" else "Partial cost data") },
+                            trailingContent = { Text(Money.format(item.revenuePaise - item.costPaise), fontWeight = FontWeight.SemiBold) }
+                        )
+                    }
                 }
                 item {
                     Text("Bills", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))

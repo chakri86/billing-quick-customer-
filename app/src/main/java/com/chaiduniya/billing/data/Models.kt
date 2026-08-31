@@ -9,6 +9,9 @@ import androidx.room.PrimaryKey
 enum class UserRole { SUPER_USER, ADMIN, EMPLOYEE }
 enum class PaymentMethod { CASH, UPI, CARD }
 enum class SyncStatus { PENDING, SYNCED, FAILED }
+enum class ExpenseStatus { PENDING, APPROVED, REJECTED, CANCELLED }
+enum class InventoryUnit { PIECE, PACKET, GRAM, KILOGRAM, MILLILITRE, LITRE, BOTTLE, BOX }
+enum class StockTransactionType { OPENING, PURCHASE, SALE, WASTAGE, SUPPLIER_RETURN, ADJUSTMENT, SALE_CANCELLED }
 
 object BillingCategories {
     const val MISC = "Misc"
@@ -91,7 +94,103 @@ data class SaleItemEntity(
     val productNameSnapshot: String,
     val unitPricePaise: Long,
     val quantity: Int,
-    val lineTotalPaise: Long
+    val lineTotalPaise: Long,
+    @ColumnInfo(defaultValue = "0") val costTotalPaise: Long = 0,
+    @ColumnInfo(defaultValue = "0") val costConfigured: Boolean = false
+)
+
+@Entity(tableName = "expenses", indices = [Index("occurredAt"), Index("status"), Index("enteredById")])
+data class ExpenseEntity(
+    @PrimaryKey val id: String,
+    val category: String,
+    val amountPaise: Long,
+    val occurredAt: Long,
+    val paymentMethod: PaymentMethod,
+    val supplierName: String = "",
+    val description: String = "",
+    val enteredById: String,
+    val enteredByName: String,
+    val status: ExpenseStatus,
+    val approvedById: String? = null,
+    val approvedByName: String? = null,
+    val approvedAt: Long? = null,
+    val rejectedById: String? = null,
+    val rejectedByName: String? = null,
+    val rejectedAt: Long? = null,
+    val rejectionReason: String? = null,
+    val cancelledById: String? = null,
+    val cancelledByName: String? = null,
+    val cancelledAt: Long? = null,
+    val cancellationReason: String? = null,
+    val linkedStockTransactionId: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val syncStatus: SyncStatus = SyncStatus.PENDING
+)
+
+@Entity(tableName = "inventory_items", indices = [Index(value = ["name"], unique = true)])
+data class InventoryItemEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val unit: InventoryUnit,
+    val minimumStockMilli: Long = 0,
+    val averageCostPaisePerUnit: Long = 0,
+    val isArchived: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val syncStatus: SyncStatus = SyncStatus.PENDING
+)
+
+@Entity(
+    tableName = "stock_transactions",
+    foreignKeys = [ForeignKey(
+        entity = InventoryItemEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["inventoryItemId"],
+        onDelete = ForeignKey.RESTRICT
+    )],
+    indices = [Index("inventoryItemId"), Index("saleId"), Index("expenseId"), Index("createdAt")]
+)
+data class StockTransactionEntity(
+    @PrimaryKey val id: String,
+    val inventoryItemId: String,
+    val type: StockTransactionType,
+    val quantityDeltaMilli: Long,
+    val totalCostPaise: Long = 0,
+    val supplierName: String = "",
+    val description: String = "",
+    val saleId: String? = null,
+    val expenseId: String? = null,
+    val actorId: String,
+    val actorName: String,
+    val createdAt: Long = System.currentTimeMillis(),
+    val syncStatus: SyncStatus = SyncStatus.PENDING
+)
+
+@Entity(
+    tableName = "recipe_ingredients",
+    primaryKeys = ["productId", "inventoryItemId"],
+    indices = [Index("inventoryItemId")]
+)
+data class RecipeIngredientEntity(
+    val productId: String,
+    val inventoryItemId: String,
+    val quantityMilliPerSaleUnit: Long,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val syncStatus: SyncStatus = SyncStatus.PENDING
+)
+
+data class InventoryStock(
+    @androidx.room.Embedded val item: InventoryItemEntity,
+    val currentStockMilli: Long
+)
+
+data class RecipeIngredientDetail(
+    val productId: String,
+    val inventoryItemId: String,
+    val quantityMilliPerSaleUnit: Long,
+    val inventoryName: String,
+    val unit: InventoryUnit,
+    val averageCostPaisePerUnit: Long
 )
 
 data class CartLine(
@@ -150,3 +249,20 @@ data class ProductSalesSummary(
     val quantity: Long,
     val revenuePaise: Long
 )
+
+data class ProductProfitSummary(
+    val productName: String,
+    val quantity: Long,
+    val revenuePaise: Long,
+    val costPaise: Long,
+    val costConfiguredCount: Long,
+    val lineCount: Long
+)
+
+object ExpenseCategories {
+    val defaults = listOf(
+        "Milk and dairy", "Tea/coffee materials", "Sugar", "Snacks purchases",
+        "Cups and packaging", "Gas", "Electricity", "Rent", "Employee wages",
+        "Maintenance", "Transportation", "Other"
+    )
+}

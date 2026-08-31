@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.5.0
+## Included in version 0.6.0
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -33,6 +33,14 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Custom Quick Customer launcher icon for phones and tablets
 - Cash/UPI/Card, discount, tax, cancellation, and top-product summaries
 - Pending-sync status and future multi-shop identifiers
+- Employee expense entry with Admin/Super User approval
+- Approved-expense and sales-minus-expenses reports
+- Hybrid inventory for packaged stock and recipe ingredients
+- Low-stock warnings that never interrupt billing
+- Purchase, adjustment, wastage, supplier-return, and stock-history workflows
+- Automatic approved expenses for inventory purchases
+- Recipe-based sale deductions and stock restoration when a bill is cancelled
+- Weighted-average inventory cost and product-profit snapshots when costs are configured
 - Versioned Room migrations that preserve existing users, settings, products, and bills
 - Unit tests for permissions, billing calculations, totals, menu completeness, and receipt formatting
 

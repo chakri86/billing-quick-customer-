@@ -13,6 +13,14 @@ import com.chaiduniya.billing.data.BillingCategories
 import com.chaiduniya.billing.data.CartLine
 import com.chaiduniya.billing.data.CategoryEntity
 import com.chaiduniya.billing.data.PaymentMethod
+import com.chaiduniya.billing.data.ExpenseEntity
+import com.chaiduniya.billing.data.InventoryItemEntity
+import com.chaiduniya.billing.data.InventoryStock
+import com.chaiduniya.billing.data.InventoryUnit
+import com.chaiduniya.billing.data.ProductProfitSummary
+import com.chaiduniya.billing.data.RecipeIngredientDetail
+import com.chaiduniya.billing.data.StockTransactionEntity
+import com.chaiduniya.billing.data.StockTransactionType
 import com.chaiduniya.billing.data.ProductEntity
 import com.chaiduniya.billing.data.Receipt
 import com.chaiduniya.billing.data.SaleEntity
@@ -35,6 +43,8 @@ import java.util.UUID
 enum class AppSection(val label: String) {
     BILLING("Billing"),
     SALES("Sales"),
+    EXPENSES("Expenses"),
+    INVENTORY("Inventory"),
     PRODUCTS("Products"),
     USERS("Users"),
     SETTINGS("Settings")
@@ -63,6 +73,21 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         .map { it ?: ShopSettingsEntity() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ShopSettingsEntity())
     val productSales: StateFlow<List<ProductSalesSummary>> = repository.productSales.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+    val productProfit: StateFlow<List<ProductProfitSummary>> = repository.productProfit.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+    val expenses: StateFlow<List<ExpenseEntity>> = repository.expenses.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+    val inventoryStock: StateFlow<List<InventoryStock>> = repository.inventoryStock.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+    val stockTransactions: StateFlow<List<StockTransactionEntity>> = repository.stockTransactions.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+    val recipeDetails: StateFlow<List<RecipeIngredientDetail>> = repository.recipeDetails.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
 
@@ -149,6 +174,8 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         val permitted = when (section) {
             AppSection.BILLING -> AccessPolicy.allows(role, AppPermission.CREATE_BILL)
             AppSection.SALES -> true
+            AppSection.EXPENSES -> AccessPolicy.allows(role, AppPermission.VIEW_EXPENSES)
+            AppSection.INVENTORY -> AccessPolicy.allows(role, AppPermission.VIEW_INVENTORY)
             AppSection.PRODUCTS -> AccessPolicy.allows(role, AppPermission.MANAGE_PRODUCTS)
             AppSection.USERS -> AccessPolicy.allows(role, AppPermission.MANAGE_USERS)
             AppSection.SETTINGS -> AccessPolicy.allows(role, AppPermission.MANAGE_SHOP)
@@ -346,6 +373,93 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             runCatching { repository.saveSettings(settings, actor) }
                 .onFailure { operationError = it.message ?: "Settings could not be saved." }
+        }
+    }
+
+    fun addExpense(
+        category: String,
+        amountPaise: Long,
+        paymentMethod: PaymentMethod,
+        supplierName: String,
+        description: String
+    ) {
+        if (!hasPermission(AppPermission.ADD_EXPENSE)) return
+        val actor = currentUser ?: return
+        viewModelScope.launch {
+            runCatching { repository.addExpense(actor, category, amountPaise, paymentMethod, supplierName, description) }
+                .onFailure { operationError = it.message ?: "Expense could not be saved." }
+        }
+    }
+
+    fun approveExpense(expense: ExpenseEntity) = expenseAction(AppPermission.APPROVE_EXPENSES) { actor ->
+        repository.approveExpense(expense, actor)
+    }
+
+    fun rejectExpense(expense: ExpenseEntity, reason: String) = expenseAction(AppPermission.APPROVE_EXPENSES) { actor ->
+        repository.rejectExpense(expense, actor, reason)
+    }
+
+    fun cancelExpense(expense: ExpenseEntity, reason: String) = expenseAction(AppPermission.APPROVE_EXPENSES) { actor ->
+        repository.cancelExpense(expense, actor, reason)
+    }
+
+    private fun expenseAction(permission: AppPermission, action: suspend (UserEntity) -> Unit) {
+        if (!hasPermission(permission)) return
+        val actor = currentUser ?: return
+        viewModelScope.launch {
+            runCatching { action(actor) }.onFailure { operationError = it.message ?: "Expense could not be updated." }
+        }
+    }
+
+    fun addInventoryItem(name: String, unit: InventoryUnit, minimumMilli: Long, openingMilli: Long) {
+        if (!hasPermission(AppPermission.MANAGE_INVENTORY)) return
+        val actor = currentUser ?: return
+        viewModelScope.launch {
+            runCatching { repository.addInventoryItem(actor, name, unit, minimumMilli, openingMilli) }
+                .onFailure { operationError = it.message ?: "Inventory item could not be saved." }
+        }
+    }
+
+    fun purchaseStock(
+        item: InventoryItemEntity,
+        quantityMilli: Long,
+        totalCostPaise: Long,
+        paymentMethod: PaymentMethod,
+        supplierName: String,
+        description: String
+    ) {
+        if (!hasPermission(AppPermission.MANAGE_INVENTORY)) return
+        val actor = currentUser ?: return
+        viewModelScope.launch {
+            runCatching { repository.purchaseStock(actor, item, quantityMilli, totalCostPaise, paymentMethod, supplierName, description) }
+                .onFailure { operationError = it.message ?: "Stock purchase could not be saved." }
+        }
+    }
+
+    fun adjustStock(item: InventoryItemEntity, type: StockTransactionType, quantityMilli: Long, description: String) {
+        if (!hasPermission(AppPermission.MANAGE_INVENTORY)) return
+        val actor = currentUser ?: return
+        viewModelScope.launch {
+            runCatching { repository.adjustStock(actor, item, type, quantityMilli, description) }
+                .onFailure { operationError = it.message ?: "Stock adjustment could not be saved." }
+        }
+    }
+
+    fun saveRecipeIngredient(productId: String, inventoryItemId: String, quantityMilli: Long) {
+        if (!hasPermission(AppPermission.MANAGE_INVENTORY)) return
+        val actor = currentUser ?: return
+        viewModelScope.launch {
+            runCatching { repository.saveRecipeIngredient(actor, productId, inventoryItemId, quantityMilli) }
+                .onFailure { operationError = it.message ?: "Recipe could not be saved." }
+        }
+    }
+
+    fun deleteRecipeIngredient(productId: String, inventoryItemId: String) {
+        if (!hasPermission(AppPermission.MANAGE_INVENTORY)) return
+        val actor = currentUser ?: return
+        viewModelScope.launch {
+            runCatching { repository.deleteRecipeIngredient(actor, productId, inventoryItemId) }
+                .onFailure { operationError = it.message ?: "Recipe ingredient could not be removed." }
         }
     }
 
