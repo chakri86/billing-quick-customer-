@@ -20,7 +20,12 @@ class BillingRepository(private val db: AppDatabase) {
     val pendingSyncCount: Flow<Int> = db.saleDao().observePendingCount()
     val settings: Flow<ShopSettingsEntity?> = db.settingsDao().observe()
     val productSales: Flow<List<ProductSalesSummary>> = db.saleDao().observeProductSales()
+    val productProfit: Flow<List<ProductProfitSummary>> = db.saleDao().observeProductProfit()
     val auditLogs: Flow<List<AuditLogEntity>> = db.auditDao().observeAll()
+    val expenses: Flow<List<ExpenseEntity>> = db.expenseDao().observeAll()
+    val inventoryStock: Flow<List<InventoryStock>> = db.inventoryDao().observeStock()
+    val stockTransactions: Flow<List<StockTransactionEntity>> = db.inventoryDao().observeTransactions()
+    val recipeDetails: Flow<List<RecipeIngredientDetail>> = db.inventoryDao().observeRecipeDetails()
 
     suspend fun ensureSeeded() = db.withTransaction {
         if (db.productDao().count() == 0) {
@@ -168,7 +173,17 @@ class BillingRepository(private val db: AppDatabase) {
             changeReturnedPaise = received?.minus(totals.totalPaise)
         )
         db.saleDao().insertSale(sale)
+        val normalLines = lines.filterNot { it.product.id.startsWith("misc-") }
+        val recipes = db.inventoryDao().recipesForProducts(normalLines.map { it.product.id })
+        val inventoryById = db.inventoryDao().itemsByIds(recipes.map { it.inventoryItemId }.distinct())
+            .associateBy { it.id }
+        val recipesByProduct = recipes.groupBy { it.productId }
         db.saleDao().insertItems(lines.map { line ->
+            val productRecipe = recipesByProduct[line.product.id].orEmpty()
+            val unitCost = productRecipe.sumOf { ingredient ->
+                val averageCost = inventoryById[ingredient.inventoryItemId]?.averageCostPaisePerUnit ?: 0
+                ingredient.quantityMilliPerSaleUnit * averageCost / 1_000
+            }
             SaleItemEntity(
                 id = UUID.randomUUID().toString(),
                 saleId = saleId,
@@ -176,9 +191,26 @@ class BillingRepository(private val db: AppDatabase) {
                 productNameSnapshot = line.product.name,
                 unitPricePaise = line.product.pricePaise,
                 quantity = line.quantity,
-                lineTotalPaise = line.lineTotalPaise
+                lineTotalPaise = line.lineTotalPaise,
+                costTotalPaise = unitCost * line.quantity,
+                costConfigured = productRecipe.isNotEmpty()
             )
         })
+        val stockChanges = normalLines.flatMap { line ->
+            recipesByProduct[line.product.id].orEmpty().map { ingredient ->
+                StockTransactionEntity(
+                    id = UUID.randomUUID().toString(),
+                    inventoryItemId = ingredient.inventoryItemId,
+                    type = StockTransactionType.SALE,
+                    quantityDeltaMilli = -(ingredient.quantityMilliPerSaleUnit * line.quantity),
+                    saleId = saleId,
+                    actorId = cashier.id,
+                    actorName = cashier.displayName,
+                    createdAt = now
+                )
+            }
+        }
+        if (stockChanges.isNotEmpty()) db.inventoryDao().insertTransactions(stockChanges)
         Receipt(sale, lines, settings)
     }
 
@@ -193,6 +225,21 @@ class BillingRepository(private val db: AppDatabase) {
             reason = reason.trim()
         )
         require(changed == 1) { "This bill is already cancelled or no longer available." }
+        val saleTransactions = db.inventoryDao().saleTransactions(sale.id)
+        if (saleTransactions.isNotEmpty()) {
+            db.inventoryDao().insertTransactions(saleTransactions.map { original ->
+                StockTransactionEntity(
+                    id = UUID.randomUUID().toString(),
+                    inventoryItemId = original.inventoryItemId,
+                    type = StockTransactionType.SALE_CANCELLED,
+                    quantityDeltaMilli = -original.quantityDeltaMilli,
+                    description = "Stock restored for ${sale.invoiceNumber}",
+                    saleId = sale.id,
+                    actorId = actor.id,
+                    actorName = actor.displayName
+                )
+            })
+        }
         db.auditDao().insert(
             AuditLogEntity(
                 id = UUID.randomUUID().toString(),
@@ -231,6 +278,188 @@ class BillingRepository(private val db: AppDatabase) {
             )
         )
     }
+
+    suspend fun addExpense(
+        actor: UserEntity,
+        category: String,
+        amountPaise: Long,
+        paymentMethod: PaymentMethod,
+        supplierName: String,
+        description: String
+    ) = db.withTransaction {
+        require(amountPaise > 0) { "Expense amount must be greater than zero." }
+        require(category.isNotBlank()) { "Choose an expense category." }
+        val approved = actor.role != UserRole.EMPLOYEE
+        val now = System.currentTimeMillis()
+        db.expenseDao().insert(
+            ExpenseEntity(
+                id = UUID.randomUUID().toString(),
+                category = category.trim(),
+                amountPaise = amountPaise,
+                occurredAt = now,
+                paymentMethod = paymentMethod,
+                supplierName = supplierName.trim(),
+                description = description.trim(),
+                enteredById = actor.id,
+                enteredByName = actor.displayName,
+                status = if (approved) ExpenseStatus.APPROVED else ExpenseStatus.PENDING,
+                approvedById = actor.id.takeIf { approved },
+                approvedByName = actor.displayName.takeIf { approved },
+                approvedAt = now.takeIf { approved }
+            )
+        )
+    }
+
+    suspend fun approveExpense(expense: ExpenseEntity, actor: UserEntity) = db.withTransaction {
+        require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
+        require(db.expenseDao().approve(expense.id, actor.id, actor.displayName, System.currentTimeMillis()) == 1) {
+            "This expense is no longer pending."
+        }
+        addAudit("EXPENSE_APPROVED", "EXPENSE", expense.id, actor, "Expense approved")
+    }
+
+    suspend fun rejectExpense(expense: ExpenseEntity, actor: UserEntity, reason: String) = db.withTransaction {
+        require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
+        require(reason.trim().length >= 3) { "Enter a rejection reason." }
+        require(db.expenseDao().reject(expense.id, actor.id, actor.displayName, System.currentTimeMillis(), reason.trim()) == 1) {
+            "This expense is no longer pending."
+        }
+        addAudit("EXPENSE_REJECTED", "EXPENSE", expense.id, actor, reason.trim())
+    }
+
+    suspend fun cancelExpense(expense: ExpenseEntity, actor: UserEntity, reason: String) = db.withTransaction {
+        require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
+        require(expense.linkedStockTransactionId == null) {
+            "Inventory purchase expenses cannot be cancelled here. Record a supplier return or stock adjustment instead."
+        }
+        require(reason.trim().length >= 3) { "Enter a cancellation reason." }
+        require(db.expenseDao().cancel(expense.id, actor.id, actor.displayName, System.currentTimeMillis(), reason.trim()) == 1) {
+            "Only an approved expense can be cancelled."
+        }
+        addAudit("EXPENSE_CANCELLED", "EXPENSE", expense.id, actor, reason.trim())
+    }
+
+    suspend fun addInventoryItem(
+        actor: UserEntity,
+        name: String,
+        unit: InventoryUnit,
+        minimumStockMilli: Long,
+        openingStockMilli: Long
+    ) = db.withTransaction {
+        require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
+        require(name.trim().isNotBlank()) { "Inventory item name is required." }
+        require(minimumStockMilli >= 0 && openingStockMilli >= 0) { "Stock quantities cannot be negative." }
+        val item = InventoryItemEntity(
+            id = UUID.randomUUID().toString(), name = name.trim(), unit = unit,
+            minimumStockMilli = minimumStockMilli
+        )
+        db.inventoryDao().insertItem(item)
+        if (openingStockMilli > 0) db.inventoryDao().insertTransaction(
+            StockTransactionEntity(
+                id = UUID.randomUUID().toString(), inventoryItemId = item.id,
+                type = StockTransactionType.OPENING, quantityDeltaMilli = openingStockMilli,
+                description = "Opening stock", actorId = actor.id, actorName = actor.displayName
+            )
+        )
+    }
+
+    suspend fun purchaseStock(
+        actor: UserEntity,
+        item: InventoryItemEntity,
+        quantityMilli: Long,
+        totalCostPaise: Long,
+        paymentMethod: PaymentMethod,
+        supplierName: String,
+        description: String
+    ) = db.withTransaction {
+        require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
+        require(quantityMilli > 0) { "Purchase quantity must be greater than zero." }
+        require(totalCostPaise > 0) { "Purchase cost must be greater than zero." }
+        val now = System.currentTimeMillis()
+        val transactionId = UUID.randomUUID().toString()
+        val expenseId = UUID.randomUUID().toString()
+        val currentStock = db.inventoryDao().currentStock(item.id).coerceAtLeast(0)
+        val newStock = currentStock + quantityMilli
+        val oldValue = currentStock * item.averageCostPaisePerUnit / 1_000
+        val newAverage = (oldValue + totalCostPaise) * 1_000 / newStock
+        db.inventoryDao().updateItem(item.copy(averageCostPaisePerUnit = newAverage, updatedAt = now))
+        db.expenseDao().insert(
+            ExpenseEntity(
+                id = expenseId, category = "Inventory purchase", amountPaise = totalCostPaise,
+                occurredAt = now, paymentMethod = paymentMethod, supplierName = supplierName.trim(),
+                description = description.trim().ifBlank { "${item.name} stock purchase" },
+                enteredById = actor.id, enteredByName = actor.displayName,
+                status = ExpenseStatus.APPROVED, approvedById = actor.id,
+                approvedByName = actor.displayName, approvedAt = now,
+                linkedStockTransactionId = transactionId, createdAt = now
+            )
+        )
+        db.inventoryDao().insertTransaction(
+            StockTransactionEntity(
+                id = transactionId, inventoryItemId = item.id, type = StockTransactionType.PURCHASE,
+                quantityDeltaMilli = quantityMilli, totalCostPaise = totalCostPaise,
+                supplierName = supplierName.trim(), description = description.trim(), expenseId = expenseId,
+                actorId = actor.id, actorName = actor.displayName, createdAt = now
+            )
+        )
+    }
+
+    suspend fun adjustStock(
+        actor: UserEntity,
+        item: InventoryItemEntity,
+        type: StockTransactionType,
+        quantityDeltaMilli: Long,
+        description: String
+    ) = db.withTransaction {
+        require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
+        require(type in setOf(StockTransactionType.ADJUSTMENT, StockTransactionType.WASTAGE, StockTransactionType.SUPPLIER_RETURN)) {
+            "Unsupported stock adjustment."
+        }
+        require(quantityDeltaMilli != 0L) { "Enter a stock quantity." }
+        require(description.trim().length >= 3) { "Enter a reason." }
+        val safeDelta = when (type) {
+            StockTransactionType.WASTAGE, StockTransactionType.SUPPLIER_RETURN -> -kotlin.math.abs(quantityDeltaMilli)
+            else -> quantityDeltaMilli
+        }
+        db.inventoryDao().insertTransaction(
+            StockTransactionEntity(
+                id = UUID.randomUUID().toString(), inventoryItemId = item.id, type = type,
+                quantityDeltaMilli = safeDelta, description = description.trim(),
+                actorId = actor.id, actorName = actor.displayName
+            )
+        )
+    }
+
+    suspend fun saveRecipeIngredient(
+        actor: UserEntity,
+        productId: String,
+        inventoryItemId: String,
+        quantityMilliPerSaleUnit: Long
+    ) {
+        require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
+        require(quantityMilliPerSaleUnit > 0) { "Recipe quantity must be greater than zero." }
+        db.inventoryDao().saveRecipeIngredient(
+            RecipeIngredientEntity(productId, inventoryItemId, quantityMilliPerSaleUnit)
+        )
+    }
+
+    suspend fun deleteRecipeIngredient(actor: UserEntity, productId: String, inventoryItemId: String) {
+        require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
+        db.inventoryDao().deleteRecipeIngredient(productId, inventoryItemId)
+    }
+
+    private suspend fun addAudit(
+        action: String,
+        entityType: String,
+        entityId: String,
+        actor: UserEntity,
+        reason: String
+    ) = db.auditDao().insert(
+        AuditLogEntity(
+            id = UUID.randomUUID().toString(), action = action, entityType = entityType,
+            entityId = entityId, actorId = actor.id, actorName = actor.displayName, reason = reason
+        )
+    )
 
     private fun newUser(
         username: String,

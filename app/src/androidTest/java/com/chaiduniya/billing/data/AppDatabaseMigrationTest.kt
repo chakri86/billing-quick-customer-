@@ -98,9 +98,50 @@ class AppDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migrate5To6AddsExpensesInventoryRecipesAndCostSnapshots() {
+        helper.createDatabase(TEST_DB_V5, 5).apply {
+            execSQL(
+                """
+                INSERT INTO sales (
+                    id, businessId, shopId, deviceId, invoiceNumber, createdAt,
+                    cashierId, cashierName, subtotalPaise, discountPaise, taxPaise,
+                    totalPaise, paymentMethod, cashReceivedPaise, changeReturnedPaise,
+                    isCancelled, cancelledAt, cancelledById, cancelledByName,
+                    cancellationReason, syncStatus
+                ) VALUES ('sale-v5', 'business-demo', 'shop-main', 'device-1', 'CD-V5', 1000,
+                    'cashier', 'Cashier', 2000, 0, 0, 2000, 'CASH', 2000, 0,
+                    0, NULL, NULL, NULL, NULL, 'PENDING')
+                """.trimIndent()
+            )
+            execSQL(
+                """
+                INSERT INTO sale_items (id, saleId, productId, productNameSnapshot, unitPricePaise, quantity, lineTotalPaise)
+                VALUES ('line-v5', 'sale-v5', 'product-1', 'Tea', 2000, 1, 2000)
+                """.trimIndent()
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(TEST_DB_V5, 6, true, AppDatabase.MIGRATION_5_6).use { db ->
+            db.query("SELECT costTotalPaise, costConfigured FROM sale_items WHERE id = 'line-v5'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getLong(0))
+                assertEquals(0, cursor.getInt(1))
+            }
+            listOf("expenses", "inventory_items", "stock_transactions", "recipe_ingredients").forEach { table ->
+                db.query("SELECT COUNT(*) FROM $table").use { cursor ->
+                    cursor.moveToFirst()
+                    assertEquals(0, cursor.getInt(0))
+                }
+            }
+        }
+    }
+
     companion object {
         private const val TEST_DB = "chai-duniya-migration-test"
         private const val TEST_DB_V2 = "quick-customer-migration-v2-test"
         private const val TEST_DB_V4 = "quick-customer-migration-v4-test"
+        private const val TEST_DB_V5 = "quick-customer-migration-v5-test"
     }
 }

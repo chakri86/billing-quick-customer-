@@ -9,7 +9,12 @@ enum class AppPermission {
     MANAGE_PRODUCTS,
     MANAGE_USERS,
     MANAGE_SHOP,
-    CONFIGURE_PRINTER
+    CONFIGURE_PRINTER,
+    ADD_EXPENSE,
+    VIEW_EXPENSES,
+    APPROVE_EXPENSES,
+    VIEW_INVENTORY,
+    MANAGE_INVENTORY
 }
 
 object AccessPolicy {
@@ -20,8 +25,18 @@ object AccessPolicy {
             AppPermission.VIEW_ALL_SALES,
             AppPermission.CANCEL_COMPLETED_BILL,
             AppPermission.MANAGE_PRODUCTS,
-            AppPermission.CONFIGURE_PRINTER
+            AppPermission.CONFIGURE_PRINTER,
+            AppPermission.ADD_EXPENSE,
+            AppPermission.VIEW_EXPENSES,
+            AppPermission.APPROVE_EXPENSES,
+            AppPermission.VIEW_INVENTORY,
+            AppPermission.MANAGE_INVENTORY
         )
-        UserRole.EMPLOYEE -> permission == AppPermission.CREATE_BILL
+        UserRole.EMPLOYEE -> permission in setOf(
+            AppPermission.CREATE_BILL,
+            AppPermission.ADD_EXPENSE,
+            AppPermission.VIEW_EXPENSES,
+            AppPermission.VIEW_INVENTORY
+        )
     }
 }

@@ -22,6 +22,12 @@ class DbConverters {
     @TypeConverter fun stringToPayment(value: String): PaymentMethod = PaymentMethod.valueOf(value)
     @TypeConverter fun syncToString(value: SyncStatus): String = value.name
     @TypeConverter fun stringToSync(value: String): SyncStatus = SyncStatus.valueOf(value)
+    @TypeConverter fun expenseStatusToString(value: ExpenseStatus): String = value.name
+    @TypeConverter fun stringToExpenseStatus(value: String): ExpenseStatus = ExpenseStatus.valueOf(value)
+    @TypeConverter fun inventoryUnitToString(value: InventoryUnit): String = value.name
+    @TypeConverter fun stringToInventoryUnit(value: String): InventoryUnit = InventoryUnit.valueOf(value)
+    @TypeConverter fun stockTypeToString(value: StockTransactionType): String = value.name
+    @TypeConverter fun stringToStockType(value: String): StockTransactionType = StockTransactionType.valueOf(value)
 }
 
 @Dao
@@ -101,6 +107,24 @@ interface SaleDao {
         """
     )
     fun observeProductSales(): Flow<List<ProductSalesSummary>>
+    @Query(
+        """
+        SELECT si.productNameSnapshot AS productName,
+               SUM(si.quantity) AS quantity,
+               SUM(CASE WHEN s.subtotalPaise > 0
+                   THEN ((s.totalPaise - s.taxPaise) * si.lineTotalPaise / s.subtotalPaise)
+                   ELSE 0 END) AS revenuePaise,
+               SUM(si.costTotalPaise) AS costPaise,
+               SUM(CASE WHEN si.costConfigured = 1 THEN 1 ELSE 0 END) AS costConfiguredCount,
+               COUNT(*) AS lineCount
+        FROM sale_items si
+        INNER JOIN sales s ON s.id = si.saleId
+        WHERE s.isCancelled = 0
+        GROUP BY si.productNameSnapshot
+        ORDER BY revenuePaise DESC, productName ASC
+        """
+    )
+    fun observeProductProfit(): Flow<List<ProductProfitSummary>>
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertSale(sale: SaleEntity)
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertItems(items: List<SaleItemEntity>)
     @Query(
@@ -141,6 +165,79 @@ interface AuditDao {
     @Query("SELECT * FROM audit_logs ORDER BY createdAt DESC") fun observeAll(): Flow<List<AuditLogEntity>>
 }
 
+@Dao
+interface ExpenseDao {
+    @Query("SELECT * FROM expenses ORDER BY occurredAt DESC, createdAt DESC")
+    fun observeAll(): Flow<List<ExpenseEntity>>
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(expense: ExpenseEntity)
+    @Query(
+        """
+        UPDATE expenses SET status = 'APPROVED', approvedById = :actorId,
+            approvedByName = :actorName, approvedAt = :at, syncStatus = 'PENDING'
+        WHERE id = :id AND status = 'PENDING'
+        """
+    )
+    suspend fun approve(id: String, actorId: String, actorName: String, at: Long): Int
+    @Query(
+        """
+        UPDATE expenses SET status = 'REJECTED', rejectedById = :actorId,
+            rejectedByName = :actorName, rejectedAt = :at, rejectionReason = :reason,
+            syncStatus = 'PENDING' WHERE id = :id AND status = 'PENDING'
+        """
+    )
+    suspend fun reject(id: String, actorId: String, actorName: String, at: Long, reason: String): Int
+    @Query(
+        """
+        UPDATE expenses SET status = 'CANCELLED', cancelledById = :actorId,
+            cancelledByName = :actorName, cancelledAt = :at, cancellationReason = :reason,
+            syncStatus = 'PENDING' WHERE id = :id AND status = 'APPROVED'
+        """
+    )
+    suspend fun cancel(id: String, actorId: String, actorName: String, at: Long, reason: String): Int
+}
+
+@Dao
+interface InventoryDao {
+    @Query(
+        """
+        SELECT i.*, COALESCE(SUM(t.quantityDeltaMilli), 0) AS currentStockMilli
+        FROM inventory_items i
+        LEFT JOIN stock_transactions t ON t.inventoryItemId = i.id
+        WHERE i.isArchived = 0
+        GROUP BY i.id
+        ORDER BY i.name
+        """
+    )
+    fun observeStock(): Flow<List<InventoryStock>>
+    @Query("SELECT * FROM stock_transactions ORDER BY createdAt DESC")
+    fun observeTransactions(): Flow<List<StockTransactionEntity>>
+    @Query(
+        """
+        SELECT r.productId, r.inventoryItemId, r.quantityMilliPerSaleUnit,
+               i.name AS inventoryName, i.unit AS unit,
+               i.averageCostPaisePerUnit AS averageCostPaisePerUnit
+        FROM recipe_ingredients r INNER JOIN inventory_items i ON i.id = r.inventoryItemId
+        ORDER BY r.productId, i.name
+        """
+    )
+    fun observeRecipeDetails(): Flow<List<RecipeIngredientDetail>>
+    @Query("SELECT * FROM recipe_ingredients WHERE productId IN (:productIds)")
+    suspend fun recipesForProducts(productIds: List<String>): List<RecipeIngredientEntity>
+    @Query("SELECT * FROM inventory_items WHERE id IN (:ids)")
+    suspend fun itemsByIds(ids: List<String>): List<InventoryItemEntity>
+    @Query("SELECT COALESCE(SUM(quantityDeltaMilli), 0) FROM stock_transactions WHERE inventoryItemId = :itemId")
+    suspend fun currentStock(itemId: String): Long
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertItem(item: InventoryItemEntity)
+    @Update suspend fun updateItem(item: InventoryItemEntity)
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertTransaction(transaction: StockTransactionEntity)
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertTransactions(transactions: List<StockTransactionEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveRecipeIngredient(item: RecipeIngredientEntity)
+    @Query("DELETE FROM recipe_ingredients WHERE productId = :productId AND inventoryItemId = :inventoryItemId")
+    suspend fun deleteRecipeIngredient(productId: String, inventoryItemId: String)
+    @Query("SELECT * FROM stock_transactions WHERE saleId = :saleId AND type = 'SALE'")
+    suspend fun saleTransactions(saleId: String): List<StockTransactionEntity>
+}
+
 @Database(
     entities = [
         UserEntity::class,
@@ -149,9 +246,13 @@ interface AuditDao {
         SaleEntity::class,
         SaleItemEntity::class,
         ShopSettingsEntity::class,
-        AuditLogEntity::class
+        AuditLogEntity::class,
+        ExpenseEntity::class,
+        InventoryItemEntity::class,
+        StockTransactionEntity::class,
+        RecipeIngredientEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 @TypeConverters(DbConverters::class)
@@ -162,6 +263,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun saleDao(): SaleDao
     abstract fun settingsDao(): SettingsDao
     abstract fun auditDao(): AuditDao
+    abstract fun expenseDao(): ExpenseDao
+    abstract fun inventoryDao(): InventoryDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -171,7 +274,7 @@ abstract class AppDatabase : RoomDatabase() {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "chai-duniya-billing.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
                 .also { instance = it }
         }
@@ -252,6 +355,68 @@ abstract class AppDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_categories_sortOrder ON categories(sortOrder)")
+            }
+        }
+
+        internal val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sale_items ADD COLUMN costTotalPaise INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE sale_items ADD COLUMN costConfigured INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS expenses (
+                        id TEXT NOT NULL, category TEXT NOT NULL, amountPaise INTEGER NOT NULL,
+                        occurredAt INTEGER NOT NULL, paymentMethod TEXT NOT NULL,
+                        supplierName TEXT NOT NULL, description TEXT NOT NULL,
+                        enteredById TEXT NOT NULL, enteredByName TEXT NOT NULL, status TEXT NOT NULL,
+                        approvedById TEXT, approvedByName TEXT, approvedAt INTEGER,
+                        rejectedById TEXT, rejectedByName TEXT, rejectedAt INTEGER, rejectionReason TEXT,
+                        cancelledById TEXT, cancelledByName TEXT, cancelledAt INTEGER, cancellationReason TEXT,
+                        linkedStockTransactionId TEXT, createdAt INTEGER NOT NULL, syncStatus TEXT NOT NULL,
+                        PRIMARY KEY(id)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_occurredAt ON expenses(occurredAt)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_status ON expenses(status)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_expenses_enteredById ON expenses(enteredById)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS inventory_items (
+                        id TEXT NOT NULL, name TEXT NOT NULL, unit TEXT NOT NULL,
+                        minimumStockMilli INTEGER NOT NULL, averageCostPaisePerUnit INTEGER NOT NULL,
+                        isArchived INTEGER NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL,
+                        syncStatus TEXT NOT NULL, PRIMARY KEY(id)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_inventory_items_name ON inventory_items(name)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS stock_transactions (
+                        id TEXT NOT NULL, inventoryItemId TEXT NOT NULL, type TEXT NOT NULL,
+                        quantityDeltaMilli INTEGER NOT NULL, totalCostPaise INTEGER NOT NULL,
+                        supplierName TEXT NOT NULL, description TEXT NOT NULL, saleId TEXT, expenseId TEXT,
+                        actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt INTEGER NOT NULL,
+                        syncStatus TEXT NOT NULL, PRIMARY KEY(id),
+                        FOREIGN KEY(inventoryItemId) REFERENCES inventory_items(id) ON UPDATE NO ACTION ON DELETE RESTRICT
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_stock_transactions_inventoryItemId ON stock_transactions(inventoryItemId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_stock_transactions_saleId ON stock_transactions(saleId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_stock_transactions_expenseId ON stock_transactions(expenseId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_stock_transactions_createdAt ON stock_transactions(createdAt)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS recipe_ingredients (
+                        productId TEXT NOT NULL, inventoryItemId TEXT NOT NULL,
+                        quantityMilliPerSaleUnit INTEGER NOT NULL, updatedAt INTEGER NOT NULL,
+                        syncStatus TEXT NOT NULL, PRIMARY KEY(productId, inventoryItemId)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_recipe_ingredients_inventoryItemId ON recipe_ingredients(inventoryItemId)")
             }
         }
     }

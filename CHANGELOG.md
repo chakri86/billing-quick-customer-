@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0 — Expenses and hybrid inventory
+
+- Added role-aware expense entry with optional supplier and description fields.
+- Employee expenses now wait for Admin or Super User approval; manager entries are approved immediately.
+- Added approved-expense totals and sales-minus-expenses reporting.
+- Added hybrid inventory for packaged products and recipe ingredients with configurable units and low-stock warnings.
+- Added purchases, opening stock, adjustments, wastage, supplier returns, and stock history.
+- Inventory purchases automatically create approved expenses and update weighted-average cost.
+- Product recipes deduct stock after completed sales without blocking billing when stock is low or negative.
+- Cancelling a completed bill restores the exact stock quantities previously deducted.
+- Added historical product cost snapshots and product profit reporting when recipes and costs are configured.
+- Added a Room 5-to-6 migration that preserves all existing application data.
+
 ## 0.5.0 — Faster billing and catalog controls
 
 - Added a movable Misc category for one-time bill items with a required price and optional description.
