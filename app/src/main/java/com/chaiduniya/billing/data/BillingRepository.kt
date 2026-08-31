@@ -412,7 +412,7 @@ class BillingRepository(private val db: AppDatabase) {
         require(type in setOf(StockTransactionType.ADJUSTMENT, StockTransactionType.WASTAGE, StockTransactionType.SUPPLIER_RETURN)) {
             "Unsupported stock adjustment."
         }
-        require(quantityDeltaMilli != 0) { "Enter a stock quantity." }
+        require(quantityDeltaMilli != 0L) { "Enter a stock quantity." }
         require(description.trim().length >= 3) { "Enter a reason." }
         val safeDelta = when (type) {
             StockTransactionType.WASTAGE, StockTransactionType.SUPPLIER_RETURN -> -kotlin.math.abs(quantityDeltaMilli)
