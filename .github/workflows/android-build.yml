@@ -2,7 +2,7 @@ name: Android Build
 
 on:
   push:
-    branches: [main, feature/bluetooth-printing]
+    branches: [main, feature/billing-workflow-v0.5.0]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
       - name: Upload APK and Room schemas
         uses: actions/upload-artifact@v4
         with:
-          name: quick-customer-v0.4.0-debug
+          name: quick-customer-v0.5.0-debug
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/schemas/

@@ -38,8 +38,10 @@ interface UserDao {
 @Dao
 interface ProductDao {
     @Query("SELECT COUNT(*) FROM products") suspend fun count(): Int
-    @Query("SELECT * FROM products ORDER BY category, sortOrder, name")
+    @Query("SELECT * FROM products WHERE isDeleted = 0 ORDER BY category, sortOrder, name")
     fun observeAll(): Flow<List<ProductEntity>>
+    @Query("SELECT DISTINCT category FROM products WHERE isDeleted = 0 ORDER BY category")
+    suspend fun categoryNames(): List<String>
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertAll(products: List<ProductEntity>)
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(product: ProductEntity)
     @Update suspend fun update(product: ProductEntity)
@@ -60,6 +62,24 @@ interface ProductDao {
         newCategory: String,
         updatedAt: Long
     )
+    @Query(
+        "UPDATE products SET category = :newCategory, updatedAt = :updatedAt, syncStatus = 'PENDING' WHERE category = :oldCategory"
+    )
+    suspend fun renameCategory(oldCategory: String, newCategory: String, updatedAt: Long)
+}
+
+@Dao
+interface CategoryDao {
+    @Query("SELECT COUNT(*) FROM categories") suspend fun count(): Int
+    @Query("SELECT COALESCE(MAX(sortOrder), -1) FROM categories") suspend fun maxSortOrder(): Int
+    @Query("SELECT * FROM categories ORDER BY sortOrder, name")
+    fun observeAll(): Flow<List<CategoryEntity>>
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(category: CategoryEntity)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertAll(categories: List<CategoryEntity>)
+    @Query(
+        "UPDATE categories SET sortOrder = :sortOrder, updatedAt = :updatedAt, syncStatus = 'PENDING' WHERE name = :name"
+    )
+    suspend fun updateOrder(name: String, sortOrder: Int, updatedAt: Long)
 }
 
 @Dao
@@ -125,18 +145,20 @@ interface AuditDao {
     entities = [
         UserEntity::class,
         ProductEntity::class,
+        CategoryEntity::class,
         SaleEntity::class,
         SaleItemEntity::class,
         ShopSettingsEntity::class,
         AuditLogEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 @TypeConverters(DbConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
     abstract fun productDao(): ProductDao
+    abstract fun categoryDao(): CategoryDao
     abstract fun saleDao(): SaleDao
     abstract fun settingsDao(): SettingsDao
     abstract fun auditDao(): AuditDao
@@ -149,7 +171,7 @@ abstract class AppDatabase : RoomDatabase() {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "chai-duniya-billing.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 .also { instance = it }
         }
@@ -212,6 +234,24 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE shop_settings ADD COLUMN printerAddress TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE shop_settings ADD COLUMN printerPaperWidthMm INTEGER NOT NULL DEFAULT 58")
                 db.execSQL("ALTER TABLE shop_settings ADD COLUMN printerAutoPrint INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        internal val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE products ADD COLUMN isDeleted INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS categories (
+                        name TEXT NOT NULL,
+                        sortOrder INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        syncStatus TEXT NOT NULL,
+                        PRIMARY KEY(name)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_categories_sortOrder ON categories(sortOrder)")
             }
         }
     }

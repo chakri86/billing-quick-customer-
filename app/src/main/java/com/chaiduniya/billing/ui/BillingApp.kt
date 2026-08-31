@@ -54,7 +54,10 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Refresh
@@ -73,6 +76,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -82,10 +86,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
@@ -97,12 +100,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -121,6 +126,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.chaiduniya.billing.data.BillDetails
+import com.chaiduniya.billing.data.BillingCategories
 import com.chaiduniya.billing.data.CartLine
 import com.chaiduniya.billing.data.PaymentMethod
 import com.chaiduniya.billing.data.ProductEntity
@@ -134,6 +140,7 @@ import com.chaiduniya.billing.domain.BillingCalculator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @Composable
 fun BillingApp(viewModel: BillingViewModel) {
@@ -349,11 +356,59 @@ private fun sectionsFor(role: UserRole): List<SectionItem> = buildList {
 private fun AppShell(viewModel: BillingViewModel, user: UserEntity) {
     val sections = remember(user.role) { sectionsFor(user.role) }
     val pending by viewModel.pendingSyncCount.collectAsState()
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val useRail = maxWidth >= 720.dp
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = drawerState.isOpen,
+        drawerContent = {
+            ModalDrawerSheet(modifier = Modifier.widthIn(max = 320.dp)) {
+                Column(Modifier.padding(20.dp)) {
+                    Text("Quick Customer", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        "${user.displayName} • ${user.role.displayName()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Divider()
+                Spacer(Modifier.height(8.dp))
+                sections.forEach { item ->
+                    NavigationDrawerItem(
+                        selected = viewModel.currentSection == item.section,
+                        onClick = {
+                            viewModel.selectSection(item.section)
+                            scope.launch { drawerState.close() }
+                        },
+                        icon = { Icon(item.icon, null) },
+                        label = { Text(item.section.label) },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                NavigationDrawerItem(
+                    selected = false,
+                    onClick = {
+                        scope.launch {
+                            drawerState.close()
+                            viewModel.logout()
+                        }
+                    },
+                    icon = { Icon(Icons.AutoMirrored.Filled.Logout, null) },
+                    label = { Text("Sign out") },
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+    ) {
         Scaffold(
             topBar = {
                 TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Default.Menu, "Open navigation")
+                        }
+                    },
                     title = {
                         Column {
                             Text(viewModel.currentSection.label, fontWeight = FontWeight.SemiBold)
@@ -366,41 +421,12 @@ private fun AppShell(viewModel: BillingViewModel, user: UserEntity) {
                             label = { Text(if (pending == 0) "Local data ready" else "$pending pending") },
                             leadingIcon = { Icon(Icons.Default.Sync, null, Modifier.size(18.dp)) }
                         )
-                        IconButton(onClick = viewModel::logout) { Icon(Icons.AutoMirrored.Filled.Logout, "Sign out") }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
                 )
-            },
-            bottomBar = {
-                if (!useRail) {
-                    NavigationBar {
-                        sections.forEach { item ->
-                            NavigationBarItem(
-                                selected = viewModel.currentSection == item.section,
-                                onClick = { viewModel.selectSection(item.section) },
-                                icon = { Icon(item.icon, null) },
-                                label = { Text(item.section.label) }
-                            )
-                        }
-                    }
-                }
             }
         ) { padding ->
-            Row(Modifier.fillMaxSize().padding(padding)) {
-                if (useRail) {
-                    NavigationRail {
-                        Spacer(Modifier.height(8.dp))
-                        sections.forEach { item ->
-                            NavigationRailItem(
-                                selected = viewModel.currentSection == item.section,
-                                onClick = { viewModel.selectSection(item.section) },
-                                icon = { Icon(item.icon, null) },
-                                label = { Text(item.section.label) }
-                            )
-                        }
-                    }
-                    Divider(Modifier.fillMaxHeight().width(1.dp))
-                }
+            Box(Modifier.fillMaxSize().padding(padding)) {
                 when (viewModel.currentSection) {
                     AppSection.BILLING -> BillingScreen(viewModel)
                     AppSection.SALES -> SalesScreen(viewModel, user)
@@ -416,8 +442,12 @@ private fun AppShell(viewModel: BillingViewModel, user: UserEntity) {
 @Composable
 private fun BillingScreen(viewModel: BillingViewModel) {
     val allProducts by viewModel.products.collectAsState()
+    val allCategories by viewModel.categories.collectAsState()
     val active = allProducts.filter { it.isActive }
-    val categories = active.map { it.category }.distinct()
+    val activeCategoryNames = active.mapTo(mutableSetOf()) { it.category }
+    val categories = allCategories.map { it.name }.filter {
+        it == BillingCategories.MISC || it in activeCategoryNames
+    }
     LaunchedEffect(categories) {
         if (viewModel.selectedCategory !in categories) categories.firstOrNull()?.let(viewModel::selectCategory)
     }
@@ -429,14 +459,14 @@ private fun BillingScreen(viewModel: BillingViewModel) {
             maxWidth >= 840.dp -> Row(Modifier.fillMaxSize()) {
                 CategoryColumn(categories, viewModel.selectedCategory, viewModel::selectCategory, Modifier.width(160.dp))
                 Divider(Modifier.fillMaxHeight().width(1.dp))
-                ProductPanel(visible, viewModel::add, Modifier.weight(1f))
+                CatalogPanel(viewModel.selectedCategory, visible, viewModel, Modifier.weight(1f))
                 Divider(Modifier.fillMaxHeight().width(1.dp))
                 CartPane(viewModel, Modifier.width(340.dp))
             }
             maxWidth >= 600.dp -> Row(Modifier.fillMaxSize()) {
                 Column(Modifier.weight(1f)) {
                     CategoryStrip(categories, viewModel.selectedCategory, viewModel::selectCategory)
-                    ProductPanel(visible, viewModel::add, Modifier.weight(1f))
+                    CatalogPanel(viewModel.selectedCategory, visible, viewModel, Modifier.weight(1f))
                 }
                 Divider(Modifier.fillMaxHeight().width(1.dp))
                 CartPane(viewModel, Modifier.width(330.dp))
@@ -444,7 +474,7 @@ private fun BillingScreen(viewModel: BillingViewModel) {
             else -> Box(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxSize()) {
                     CategoryStrip(categories, viewModel.selectedCategory, viewModel::selectCategory)
-                    ProductPanel(visible, viewModel::add, Modifier.weight(1f))
+                    CatalogPanel(viewModel.selectedCategory, visible, viewModel, Modifier.weight(1f))
                 }
                 ExtendedFloatingActionButton(
                     onClick = { cartSheet = true },
@@ -460,6 +490,20 @@ private fun BillingScreen(viewModel: BillingViewModel) {
         ModalBottomSheet(onDismissRequest = { cartSheet = false }) {
             CartPane(viewModel, Modifier.fillMaxWidth().heightIn(min = 360.dp, max = 620.dp))
         }
+    }
+}
+
+@Composable
+private fun CatalogPanel(
+    selectedCategory: String?,
+    products: List<ProductEntity>,
+    viewModel: BillingViewModel,
+    modifier: Modifier = Modifier
+) {
+    if (selectedCategory == BillingCategories.MISC) {
+        MiscItemPanel(viewModel::addMisc, modifier)
+    } else {
+        ProductPanel(products, viewModel::add, modifier)
     }
 }
 
@@ -492,6 +536,53 @@ private fun CategoryStrip(categories: List<String>, selected: String?, onSelect:
     ) {
         items(categories) { category ->
             FilterChip(selected = category == selected, onClick = { onSelect(category) }, label = { Text(category) })
+        }
+    }
+}
+
+@Composable
+private fun MiscItemPanel(onAdd: (Long, String) -> Unit, modifier: Modifier = Modifier) {
+    var price by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    val pricePaise = Money.parseRupeesToPaise(price)
+    Box(modifier.padding(16.dp), contentAlignment = Alignment.TopCenter) {
+        OutlinedCard(Modifier.fillMaxWidth().widthIn(max = 560.dp)) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("Add Misc item", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    "Use this for a one-time item or charge. It will appear on this bill only.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = price,
+                    onValueChange = { value ->
+                        price = value.filter { it.isDigit() || it == '.' }.take(12)
+                    },
+                    label = { Text("Price in ₹") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it.take(80) },
+                    label = { Text("Description (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(
+                    onClick = {
+                        val amount = requireNotNull(pricePaise)
+                        onAdd(amount, description)
+                        price = ""
+                        description = ""
+                    },
+                    enabled = pricePaise != null && pricePaise > 0,
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                ) {
+                    Text("Add to bill")
+                }
+            }
         }
     }
 }
@@ -1129,50 +1220,109 @@ private fun CancelSaleDialog(sale: SaleEntity, onDismiss: () -> Unit, onConfirm:
 @Composable
 private fun ProductsScreen(viewModel: BillingViewModel) {
     val products by viewModel.products.collectAsState()
+    val categories by viewModel.categories.collectAsState()
     var editing by remember { mutableStateOf<ProductEntity?>(null) }
     var creating by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxSize()) {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(260.dp),
-            contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 96.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    var organizingCategories by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<ProductEntity?>(null) }
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            items(products, key = { it.id }) { product ->
-                OutlinedCard(
-                    modifier = Modifier.clickable { editing = product },
-                    border = BorderStroke(1.dp, if (product.isActive) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error)
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(product.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text(product.category, style = MaterialTheme.typography.bodySmall)
-                        Spacer(Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(Money.format(product.pricePaise), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.weight(1f))
-                            Text(if (product.isActive) "Active" else "Disabled", style = MaterialTheme.typography.bodySmall)
-                            Switch(checked = product.isActive, onCheckedChange = { viewModel.toggleProduct(product) })
+            Column(Modifier.weight(1f)) {
+                Text("Products", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Disable temporarily or remove products no longer sold.", style = MaterialTheme.typography.bodySmall)
+            }
+            OutlinedButton(onClick = { organizingCategories = true }) {
+                Text("Organize categories")
+            }
+        }
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(260.dp),
+                contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(products, key = { it.id }) { product ->
+                    OutlinedCard(
+                        modifier = Modifier.clickable { editing = product },
+                        border = BorderStroke(1.dp, if (product.isActive) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text(product.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(product.category, style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(Money.format(product.pricePaise), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.weight(1f))
+                                Text(if (product.isActive) "Active" else "Disabled", style = MaterialTheme.typography.bodySmall)
+                                Switch(checked = product.isActive, onCheckedChange = { viewModel.toggleProduct(product) })
+                            }
                         }
                     }
                 }
             }
-        }
-        FloatingActionButton(onClick = { creating = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp)) {
-            Icon(Icons.Default.Add, "Add product")
+            FloatingActionButton(onClick = { creating = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp)) {
+                Icon(Icons.Default.Add, "Add product")
+            }
         }
     }
-    if (creating) ProductDialog(null, { creating = false }) { name, category, price ->
-        viewModel.saveProduct(null, name, category, price); creating = false
-    }
+    if (creating) ProductDialog(
+        product = null,
+        onDismiss = { creating = false },
+        onDelete = null,
+        onSave = { name, category, price ->
+            viewModel.saveProduct(null, name, category, price); creating = false
+        }
+    )
     editing?.let { product ->
-        ProductDialog(product, { editing = null }) { name, category, price ->
-            viewModel.saveProduct(product, name, category, price); editing = null
-        }
+        ProductDialog(
+            product = product,
+            onDismiss = { editing = null },
+            onDelete = {
+                pendingDelete = product
+                editing = null
+            },
+            onSave = { name, category, price ->
+                viewModel.saveProduct(product, name, category, price); editing = null
+            }
+        )
+    }
+    pendingDelete?.let { product ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Remove ${product.name}?") },
+            text = { Text("It will disappear from Products and Billing. Existing bills and reports will keep their original item details.") },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.deleteProduct(product)
+                    pendingDelete = null
+                }) { Text("Remove product") }
+            },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } }
+        )
+    }
+    if (organizingCategories) {
+        CategoryOrderDialog(
+            categories = categories.map { it.name },
+            onDismiss = { organizingCategories = false },
+            onSave = {
+                viewModel.saveCategoryOrder(it)
+                organizingCategories = false
+            }
+        )
     }
 }
 
 @Composable
-private fun ProductDialog(product: ProductEntity?, onDismiss: () -> Unit, onSave: (String, String, Long) -> Unit) {
+private fun ProductDialog(
+    product: ProductEntity?,
+    onDismiss: () -> Unit,
+    onDelete: (() -> Unit)?,
+    onSave: (String, String, Long) -> Unit
+) {
     var name by remember(product) { mutableStateOf(product?.name.orEmpty()) }
     var category by remember(product) { mutableStateOf(product?.category.orEmpty()) }
     var price by remember(product) { mutableStateOf(product?.pricePaise?.div(100)?.toString().orEmpty()) }
@@ -1192,6 +1342,69 @@ private fun ProductDialog(product: ProductEntity?, onDismiss: () -> Unit, onSave
             }
         },
         confirmButton = { Button(onClick = { onSave(name, category, price.toLong()) }, enabled = valid) { Text("Save") } },
+        dismissButton = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onDelete != null) {
+                    TextButton(onClick = onDelete) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    )
+}
+
+@Composable
+private fun CategoryOrderDialog(
+    categories: List<String>,
+    onDismiss: () -> Unit,
+    onSave: (List<String>) -> Unit
+) {
+    var ordered by remember(categories) { mutableStateOf(categories) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Organize categories") },
+        text = {
+            Column {
+                Text(
+                    "Move frequently used categories to the top. The billing screen will use this order.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                LazyColumn(Modifier.heightIn(max = 480.dp)) {
+                    items(ordered, key = { it }) { category ->
+                        val index = ordered.indexOf(category)
+                        ListItem(
+                            headlineContent = { Text(category, fontWeight = FontWeight.Medium) },
+                            supportingContent = { Text("Position ${index + 1}") },
+                            trailingContent = {
+                                Row {
+                                    IconButton(
+                                        onClick = {
+                                            if (index > 0) ordered = ordered.toMutableList().apply {
+                                                add(index - 1, removeAt(index))
+                                            }
+                                        },
+                                        enabled = index > 0
+                                    ) { Icon(Icons.Default.KeyboardArrowUp, "Move $category up") }
+                                    IconButton(
+                                        onClick = {
+                                            if (index < ordered.lastIndex) ordered = ordered.toMutableList().apply {
+                                                add(index + 1, removeAt(index))
+                                            }
+                                        },
+                                        enabled = index < ordered.lastIndex
+                                    ) { Icon(Icons.Default.KeyboardArrowDown, "Move $category down") }
+                                }
+                            }
+                        )
+                        Divider()
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { onSave(ordered) }) { Text("Save order") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }

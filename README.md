@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.4.0
+## Included in version 0.5.0
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -11,7 +11,10 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - PBKDF2-hashed local passwords
 - All 72 supplied products in 12 categories
 - Offline Room/SQLite database
-- Product add, edit, price change, enable, and disable controls
+- Product add, edit, price change, temporary disable, and safe removal controls
+- One-time Misc bill items with a required amount and optional description
+- Super User category ordering for keeping high-volume categories at the top
+- Temporary navigation drawer that leaves the full screen available for billing
 - Cart quantity controls and guided Cash/UPI/Card checkout
 - Cash-received entry with automatic change calculation and receipt recording
 - Owner-uploaded, replaceable UPI QR image shown during UPI payment
@@ -65,7 +68,7 @@ Test both portrait and landscape orientation. Bluetooth printer validation requi
 
 1. Pair the printer in the tablet or phone's Android Bluetooth settings.
 2. Sign in as the Super User.
-3. Open **Settings → Bluetooth receipt printer**.
+3. Open the top-left menu, then select **Settings → Bluetooth receipt printer**.
 4. Enable printing and allow the Nearby devices permission.
 5. Select **58 mm** or **80 mm** paper.
 6. Tap **Refresh** and select the paired printer.

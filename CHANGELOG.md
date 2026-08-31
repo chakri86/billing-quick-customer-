@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 — Faster billing and catalog controls
+
+- Added a movable Misc category for one-time bill items with a required price and optional description.
+- Added safe product removal that hides obsolete products without changing historical bills or reports.
+- Renamed Quick Customer Special Shakes to Special Shakes for existing and new installations.
+- Added owner-controlled category ordering for keeping high-volume categories at the top.
+- Replaced the permanent navigation rail and bottom bar with a temporary menu drawer to provide more billing space.
+- Added a Room 4-to-5 migration that preserves existing users, products, bills, settings, and printer configuration.
+
 ## 0.4.0 — Generic Bluetooth ESC/POS printing
 
 - Added paired Bluetooth-printer selection with Android 12+ Nearby devices permission handling.

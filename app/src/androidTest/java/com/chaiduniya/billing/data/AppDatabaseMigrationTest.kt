@@ -70,8 +70,37 @@ class AppDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migrate4To5AddsSafeProductRemovalAndCategoryOrdering() {
+        helper.createDatabase(TEST_DB_V4, 4).apply {
+            execSQL(
+                """
+                INSERT INTO products (
+                    id, category, name, pricePaise, sortOrder, isActive, updatedAt, syncStatus
+                ) VALUES (
+                    'product-1', 'Teas', 'Dum Tea', 1200, 0, 1, 1000, 'PENDING'
+                )
+                """.trimIndent()
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(TEST_DB_V4, 5, true, AppDatabase.MIGRATION_4_5).use { db ->
+            db.query("SELECT name, isDeleted FROM products WHERE id = 'product-1'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("Dum Tea", cursor.getString(0))
+                assertEquals(0, cursor.getInt(1))
+            }
+            db.query("SELECT COUNT(*) FROM categories").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
     companion object {
         private const val TEST_DB = "chai-duniya-migration-test"
         private const val TEST_DB_V2 = "quick-customer-migration-v2-test"
+        private const val TEST_DB_V4 = "quick-customer-migration-v4-test"
     }
 }

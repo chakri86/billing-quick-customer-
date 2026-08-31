@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.Flow
 
 class BillingRepository(private val db: AppDatabase) {
     val products: Flow<List<ProductEntity>> = db.productDao().observeAll()
+    val categories: Flow<List<CategoryEntity>> = db.categoryDao().observeAll()
     val users: Flow<List<UserEntity>> = db.userDao().observeAll()
     val sales: Flow<List<SaleEntity>> = db.saleDao().observeAll()
     val pendingSyncCount: Flow<Int> = db.saleDao().observePendingCount()
@@ -33,6 +34,12 @@ class BillingRepository(private val db: AppDatabase) {
                 updatedAt = System.currentTimeMillis()
             )
         }
+        db.productDao().renameCategory(
+            oldCategory = "Quick Customer Special Shakes",
+            newCategory = "Special Shakes",
+            updatedAt = System.currentTimeMillis()
+        )
+        ensureCategories()
         if (db.settingsDao().count() == 0) db.settingsDao().save(ShopSettingsEntity())
         else db.settingsDao().renameDefaultShop("Chai Duniya", "Quick Customer", System.currentTimeMillis())
     }
@@ -68,7 +75,12 @@ class BillingRepository(private val db: AppDatabase) {
 
     suspend fun updateUser(user: UserEntity) = db.userDao().update(user)
 
-    suspend fun addProduct(name: String, category: String, priceRupees: Long) {
+    suspend fun addProduct(name: String, category: String, priceRupees: Long) = db.withTransaction {
+        require(name.trim().isNotBlank()) { "Product name is required." }
+        require(category.trim().isNotBlank()) { "Category is required." }
+        require(category.trim() != BillingCategories.MISC) { "Misc is reserved for custom bill items." }
+        require(priceRupees > 0) { "Price must be greater than zero." }
+        ensureCategory(category.trim())
         db.productDao().insert(
             ProductEntity(
                 id = UUID.randomUUID().toString(),
@@ -80,9 +92,37 @@ class BillingRepository(private val db: AppDatabase) {
         )
     }
 
-    suspend fun updateProduct(product: ProductEntity) = db.productDao().update(
-        product.copy(updatedAt = System.currentTimeMillis(), syncStatus = SyncStatus.PENDING)
+    suspend fun updateProduct(product: ProductEntity) = db.withTransaction {
+        require(product.name.trim().isNotBlank()) { "Product name is required." }
+        require(product.category.trim().isNotBlank()) { "Category is required." }
+        require(product.category.trim() != BillingCategories.MISC) { "Misc is reserved for custom bill items." }
+        require(product.pricePaise > 0) { "Price must be greater than zero." }
+        ensureCategory(product.category.trim())
+        db.productDao().update(
+            product.copy(
+                name = product.name.trim(),
+                category = product.category.trim(),
+                updatedAt = System.currentTimeMillis(),
+                syncStatus = SyncStatus.PENDING
+            )
+        )
+    }
+
+    suspend fun deleteProduct(product: ProductEntity) = db.productDao().update(
+        product.copy(
+            isActive = false,
+            isDeleted = true,
+            updatedAt = System.currentTimeMillis(),
+            syncStatus = SyncStatus.PENDING
+        )
     )
+
+    suspend fun saveCategoryOrder(names: List<String>) = db.withTransaction {
+        val now = System.currentTimeMillis()
+        names.distinct().forEachIndexed { index, name ->
+            db.categoryDao().updateOrder(name, index, now)
+        }
+    }
 
     suspend fun billDetails(sale: SaleEntity, settings: ShopSettingsEntity): BillDetails =
         BillDetails(sale, db.saleDao().itemsForSale(sale.id), settings)
@@ -213,6 +253,23 @@ class BillingRepository(private val db: AppDatabase) {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(time))
         val suffix = UUID.randomUUID().toString().take(4).uppercase()
         return "CD-$stamp-$suffix"
+    }
+
+    private suspend fun ensureCategories() {
+        val productCategories = db.productDao().categoryNames()
+        val orderedNames = buildList {
+            add(BillingCategories.MISC)
+            addAll(productCategories.filterNot { it == BillingCategories.MISC }.sorted())
+        }
+        db.categoryDao().insertAll(
+            orderedNames.mapIndexed { index, name -> CategoryEntity(name = name, sortOrder = index) }
+        )
+    }
+
+    private suspend fun ensureCategory(name: String) {
+        db.categoryDao().insert(
+            CategoryEntity(name = name, sortOrder = db.categoryDao().maxSortOrder() + 1)
+        )
     }
 }
 
