@@ -329,6 +329,9 @@ class BillingRepository(private val db: AppDatabase) {
 
     suspend fun cancelExpense(expense: ExpenseEntity, actor: UserEntity, reason: String) = db.withTransaction {
         require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
+        require(expense.linkedStockTransactionId == null) {
+            "Inventory purchase expenses cannot be cancelled here. Record a supplier return or stock adjustment instead."
+        }
         require(reason.trim().length >= 3) { "Enter a cancellation reason." }
         require(db.expenseDao().cancel(expense.id, actor.id, actor.displayName, System.currentTimeMillis(), reason.trim()) == 1) {
             "Only an approved expense can be cancelled."

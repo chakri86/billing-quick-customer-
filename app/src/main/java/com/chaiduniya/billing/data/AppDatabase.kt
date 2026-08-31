@@ -111,7 +111,9 @@ interface SaleDao {
         """
         SELECT si.productNameSnapshot AS productName,
                SUM(si.quantity) AS quantity,
-               SUM(si.lineTotalPaise) AS revenuePaise,
+               SUM(CASE WHEN s.subtotalPaise > 0
+                   THEN ((s.totalPaise - s.taxPaise) * si.lineTotalPaise / s.subtotalPaise)
+                   ELSE 0 END) AS revenuePaise,
                SUM(si.costTotalPaise) AS costPaise,
                SUM(CASE WHEN si.costConfigured = 1 THEN 1 ELSE 0 END) AS costConfiguredCount,
                COUNT(*) AS lineCount

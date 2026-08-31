@@ -63,7 +63,13 @@ fun ExpenseScreen(viewModel: BillingViewModel, user: UserEntity) {
     val now = System.currentTimeMillis()
     val cutoff = when (period.days) {
         null -> null
-        0 -> now - (now % 86_400_000L)
+        0 -> java.util.Calendar.getInstance().apply {
+            timeInMillis = now
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
         else -> now - period.days!! * 86_400_000L
     }
     val visible = allExpenses.filter {
@@ -116,7 +122,7 @@ fun ExpenseScreen(viewModel: BillingViewModel, user: UserEntity) {
                                         OutlinedButton(onClick = { action = expense to "REJECT" }) { Text("Reject") }
                                     }
                                 }
-                                if (user.role != UserRole.EMPLOYEE && expense.status == ExpenseStatus.APPROVED) {
+                                if (user.role != UserRole.EMPLOYEE && expense.status == ExpenseStatus.APPROVED && expense.linkedStockTransactionId == null) {
                                     TextButton(onClick = { action = expense to "CANCEL" }) { Text("Cancel expense") }
                                 }
                             }
