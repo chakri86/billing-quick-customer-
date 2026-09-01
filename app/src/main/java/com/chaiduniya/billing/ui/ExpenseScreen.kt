@@ -49,8 +49,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class ExpensePeriod(val label: String, val days: Int?) {
-    TODAY("Today", 0), WEEK("7 days", 7), MONTH("30 days", 30), ALL("All time", null)
+private enum class ExpensePeriod(val label: String) {
+    TODAY("Today"), WEEK("7 days"), MONTH("30 days"), CUSTOM("Custom"), ALL("All time")
 }
 
 @Composable
@@ -58,26 +58,25 @@ fun ExpenseScreen(viewModel: BillingViewModel, user: UserEntity) {
     val allExpenses by viewModel.expenses.collectAsState()
     val allSales by viewModel.sales.collectAsState()
     var period by remember { mutableStateOf(ExpensePeriod.TODAY) }
+    var customWindow by remember { mutableStateOf(todayWindow()) }
+    var showCustomDates by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var action by remember { mutableStateOf<Pair<ExpenseEntity, String>?>(null) }
-    val now = System.currentTimeMillis()
-    val cutoff = when (period.days) {
-        null -> null
-        0 -> java.util.Calendar.getInstance().apply {
-            timeInMillis = now
-            set(java.util.Calendar.HOUR_OF_DAY, 0)
-            set(java.util.Calendar.MINUTE, 0)
-            set(java.util.Calendar.SECOND, 0)
-            set(java.util.Calendar.MILLISECOND, 0)
-        }.timeInMillis
-        else -> now - period.days!! * 86_400_000L
+    val reportWindow = when (period) {
+        ExpensePeriod.TODAY -> todayWindow()
+        ExpensePeriod.WEEK -> recentDaysWindow(7)
+        ExpensePeriod.MONTH -> recentDaysWindow(30)
+        ExpensePeriod.CUSTOM -> customWindow
+        ExpensePeriod.ALL -> null
     }
     val visible = allExpenses.filter {
-        (user.role != UserRole.EMPLOYEE || it.enteredById == user.id) && (cutoff == null || it.occurredAt >= cutoff)
+        (user.role != UserRole.EMPLOYEE || it.enteredById == user.id) &&
+            (reportWindow == null || reportWindow.contains(it.occurredAt))
     }
     val approved = visible.filter { it.status == ExpenseStatus.APPROVED }
     val sales = allSales.filter {
-        !it.isCancelled && (user.role != UserRole.EMPLOYEE || it.cashierId == user.id) && (cutoff == null || it.createdAt >= cutoff)
+        !it.isCancelled && (user.role != UserRole.EMPLOYEE || it.cashierId == user.id) &&
+            (reportWindow == null || reportWindow.contains(it.createdAt))
     }
     val salesTotal = sales.sumOf { it.totalPaise }
     val expenseTotal = approved.sumOf { it.amountPaise }
@@ -87,7 +86,19 @@ fun ExpenseScreen(viewModel: BillingViewModel, user: UserEntity) {
             Text(if (user.role == UserRole.EMPLOYEE) "My expenses" else "Shop expenses", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
                 items(ExpensePeriod.entries) { item ->
-                    FilterChip(selected = period == item, onClick = { period = item }, label = { Text(item.label) })
+                    FilterChip(
+                        selected = period == item,
+                        onClick = {
+                            period = item
+                            if (item == ExpensePeriod.CUSTOM) showCustomDates = true
+                        },
+                        label = { Text(item.label) }
+                    )
+                }
+            }
+            if (period == ExpensePeriod.CUSTOM) {
+                TextButton(onClick = { showCustomDates = true }) {
+                    Text("Selected: ${formatDateWindow(customWindow)}")
                 }
             }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -108,7 +119,8 @@ fun ExpenseScreen(viewModel: BillingViewModel, user: UserEntity) {
                                     Text(expense.category, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                                     Text(Money.format(expense.amountPaise), fontWeight = FontWeight.Bold)
                                 }
-                                Text("${expense.enteredByName} • ${expense.paymentMethod.name} • ${formatExpenseDate(expense.occurredAt)}")
+                                Text("Expense date: ${formatDateOnly(expense.occurredAt)}", fontWeight = FontWeight.Medium)
+                                Text("Entered by ${expense.enteredByName} • ${formatExpenseDate(expense.createdAt)} • ${expense.paymentMethod.name}")
                                 if (expense.supplierName.isNotBlank()) Text("Supplier/paid to: ${expense.supplierName}")
                                 if (expense.description.isNotBlank()) Text(expense.description)
                                 Text("Status: ${expense.status.name}", color = when (expense.status) {
@@ -135,8 +147,8 @@ fun ExpenseScreen(viewModel: BillingViewModel, user: UserEntity) {
             androidx.compose.material3.Icon(Icons.Default.Add, "Add expense")
         }
     }
-    if (adding) AddExpenseDialog(onDismiss = { adding = false }) { category, amount, method, supplier, description ->
-        viewModel.addExpense(category, amount, method, supplier, description)
+    if (adding) AddExpenseDialog(onDismiss = { adding = false }) { category, amount, method, supplier, description, occurredAt ->
+        viewModel.addExpense(category, amount, method, supplier, description, occurredAt)
         adding = false
     }
     action?.let { (expense, type) ->
@@ -144,6 +156,17 @@ fun ExpenseScreen(viewModel: BillingViewModel, user: UserEntity) {
             if (type == "REJECT") viewModel.rejectExpense(expense, reason) else viewModel.cancelExpense(expense, reason)
             action = null
         }
+    }
+    if (showCustomDates) {
+        CustomDateRangeDialog(
+            initialWindow = customWindow,
+            onDismiss = { showCustomDates = false },
+            onConfirm = {
+                customWindow = it
+                period = ExpensePeriod.CUSTOM
+                showCustomDates = false
+            }
+        )
     }
 }
 
@@ -153,12 +176,14 @@ private fun ExpenseSummary(label: String, value: String) {
 }
 
 @Composable
-private fun AddExpenseDialog(onDismiss: () -> Unit, onSave: (String, Long, PaymentMethod, String, String) -> Unit) {
+private fun AddExpenseDialog(onDismiss: () -> Unit, onSave: (String, Long, PaymentMethod, String, String, Long) -> Unit) {
     var category by remember { mutableStateOf(ExpenseCategories.defaults.first()) }
     var amount by remember { mutableStateOf("") }
     var method by remember { mutableStateOf(PaymentMethod.CASH) }
     var supplier by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var occurredAt by remember { mutableStateOf(expenseTimestampFor(java.time.LocalDate.now())) }
+    var selectingDate by remember { mutableStateOf(false) }
     val paise = ((amount.toDoubleOrNull() ?: 0.0) * 100).toLong()
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -169,6 +194,11 @@ private fun AddExpenseDialog(onDismiss: () -> Unit, onSave: (String, Long, Payme
                 item { LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { items(ExpenseCategories.defaults) { item -> FilterChip(selected = category == item, onClick = { category = item }, label = { Text(item) }) } } }
                 item { OutlinedTextField(amount, { amount = it }, label = { Text("Amount in ₹") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth()) }
                 item {
+                    OutlinedButton(onClick = { selectingDate = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Expense date: ${formatDateOnly(occurredAt)}")
+                    }
+                }
+                item {
                     Row { PaymentMethod.entries.forEach { item -> Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(method == item, { method = item }); Text(item.name) } } }
                 }
                 item { OutlinedTextField(supplier, { supplier = it }, label = { Text("Supplier / paid to (optional)") }, modifier = Modifier.fillMaxWidth()) }
@@ -176,9 +206,19 @@ private fun AddExpenseDialog(onDismiss: () -> Unit, onSave: (String, Long, Payme
                 item { Text("Employee entries are sent to an Admin or Super User for approval.", style = MaterialTheme.typography.bodySmall) }
             }
         },
-        confirmButton = { Button(onClick = { onSave(category, paise, method, supplier, description) }, enabled = paise > 0) { Text("Save expense") } },
+        confirmButton = { Button(onClick = { onSave(category, paise, method, supplier, description, occurredAt) }, enabled = paise > 0) { Text("Save expense") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+    if (selectingDate) {
+        ExpenseDatePickerDialog(
+            initialTimestamp = occurredAt,
+            onDismiss = { selectingDate = false },
+            onConfirm = {
+                occurredAt = it
+                selectingDate = false
+            }
+        )
+    }
 }
 
 @Composable

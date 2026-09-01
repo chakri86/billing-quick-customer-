@@ -955,15 +955,23 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
     val productProfit by viewModel.productProfit.collectAsState()
     val allExpenses by viewModel.expenses.collectAsState()
     var period by remember { mutableStateOf(ReportPeriod.TODAY) }
-    val cutoff = period.cutoff(System.currentTimeMillis())
+    var customWindow by remember { mutableStateOf(todayWindow()) }
+    var showCustomDates by remember { mutableStateOf(false) }
+    val reportWindow = when (period) {
+        ReportPeriod.TODAY -> todayWindow()
+        ReportPeriod.LAST_7_DAYS -> recentDaysWindow(7)
+        ReportPeriod.LAST_30_DAYS -> recentDaysWindow(30)
+        ReportPeriod.CUSTOM -> customWindow
+        ReportPeriod.ALL_TIME -> null
+    }
     val roleSales = if (user.role == UserRole.EMPLOYEE) allSales.filter { it.cashierId == user.id } else allSales
-    val sales = roleSales.filter { cutoff == null || it.createdAt >= cutoff }
+    val sales = roleSales.filter { reportWindow == null || reportWindow.contains(it.createdAt) }
     val validSales = sales.filterNot { it.isCancelled }
     val total = validSales.sumOf { it.totalPaise }
     val discounts = validSales.sumOf { it.discountPaise }
     val taxes = validSales.sumOf { it.taxPaise }
     val expenseTotal = allExpenses.filter {
-        it.status == ExpenseStatus.APPROVED && (cutoff == null || it.occurredAt >= cutoff)
+        it.status == ExpenseStatus.APPROVED && (reportWindow == null || reportWindow.contains(it.occurredAt))
     }.sumOf { it.amountPaise }
     var cancelling by remember { mutableStateOf<SaleEntity?>(null) }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -975,9 +983,17 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
             items(ReportPeriod.entries) { item ->
                 FilterChip(
                     selected = period == item,
-                    onClick = { period = item },
+                    onClick = {
+                        period = item
+                        if (item == ReportPeriod.CUSTOM) showCustomDates = true
+                    },
                     label = { Text(item.label) }
                 )
+            }
+        }
+        if (period == ReportPeriod.CUSTOM) {
+            TextButton(onClick = { showCustomDates = true }) {
+                Text("Selected: ${formatDateWindow(customWindow)}")
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -1045,29 +1061,25 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
             onConfirm = { reason -> viewModel.cancelSale(sale, reason); cancelling = null }
         )
     }
+    if (showCustomDates) {
+        CustomDateRangeDialog(
+            initialWindow = customWindow,
+            onDismiss = { showCustomDates = false },
+            onConfirm = {
+                customWindow = it
+                period = ReportPeriod.CUSTOM
+                showCustomDates = false
+            }
+        )
+    }
 }
 
 private enum class ReportPeriod(val label: String) {
     TODAY("Today"),
     LAST_7_DAYS("7 days"),
     LAST_30_DAYS("30 days"),
+    CUSTOM("Custom"),
     ALL_TIME("All time");
-
-    fun cutoff(now: Long): Long? = when (this) {
-        TODAY -> {
-            val calendar = java.util.Calendar.getInstance().apply {
-                timeInMillis = now
-                set(java.util.Calendar.HOUR_OF_DAY, 0)
-                set(java.util.Calendar.MINUTE, 0)
-                set(java.util.Calendar.SECOND, 0)
-                set(java.util.Calendar.MILLISECOND, 0)
-            }
-            calendar.timeInMillis
-        }
-        LAST_7_DAYS -> now - 7L * 24 * 60 * 60 * 1000
-        LAST_30_DAYS -> now - 30L * 24 * 60 * 60 * 1000
-        ALL_TIME -> null
-    }
 }
 
 @Composable

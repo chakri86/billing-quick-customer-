@@ -381,12 +381,15 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         amountPaise: Long,
         paymentMethod: PaymentMethod,
         supplierName: String,
-        description: String
+        description: String,
+        occurredAt: Long
     ) {
         if (!hasPermission(AppPermission.ADD_EXPENSE)) return
         val actor = currentUser ?: return
         viewModelScope.launch {
-            runCatching { repository.addExpense(actor, category, amountPaise, paymentMethod, supplierName, description) }
+            runCatching {
+                repository.addExpense(actor, category, amountPaise, paymentMethod, supplierName, description, occurredAt)
+            }
                 .onFailure { operationError = it.message ?: "Expense could not be saved." }
         }
     }
