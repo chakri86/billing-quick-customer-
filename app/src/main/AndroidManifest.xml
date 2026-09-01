@@ -9,14 +9,15 @@
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 
     <application
-        android:name=".ChaiDuniyaApplication"
+        android:name=".QuickCustomerApplication"
         android:allowBackup="true"
         android:fullBackupContent="true"
         android:icon="@mipmap/ic_launcher"
         android:label="Quick Customer"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ChaiDuniya">
+        android:usesCleartextTraffic="false"
+        android:theme="@style/Theme.QuickCustomer">
         <activity
             android:name=".MainActivity"
             android:exported="true"

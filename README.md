@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.6.1
+## Included in version 0.7.0
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -45,6 +45,9 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Weighted-average inventory cost and product-profit snapshots when costs are configured
 - Versioned Room migrations that preserve existing users, settings, products, and bills
 - Unit tests for permissions, billing calculations, totals, menu completeness, and receipt formatting
+- Complete Quick Customer application identity using package ID `com.quickcustomer.billing`
+- In-app privacy-policy access and permanent local-data deletion
+- Play Store listing, Data Safety worksheet, reviewer instructions, release checklist, and signed-AAB workflow
 
 Cloud API synchronization is scheduled after the local billing and printer workflows are accepted. Bills are already marked with sync state, business ID, shop ID, and device ID so cloud sync does not require a database redesign.
 
@@ -101,6 +104,22 @@ Debug APK output:
 ```text
 app\build\outputs\apk\debug\app-debug.apk
 ```
+
+## Google Play release
+
+Google Play uses the Android App Bundle:
+
+```powershell
+.\gradlew.bat bundleRelease
+```
+
+Unsigned bundle output when no upload key is configured:
+
+```text
+app\build\outputs\bundle\release\app-release.aab
+```
+
+For a signed bundle, create `keystore.properties` from `keystore.properties.example` and keep the keystore and passwords outside GitHub. The full process is documented in `play/PLAY_RELEASE_CHECKLIST.md`.
 
 ## Product decisions still awaiting owner confirmation
 
