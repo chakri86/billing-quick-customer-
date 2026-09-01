@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500" viewBox="0 0 1024 500">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#004D35"/>
+      <stop offset="1" stop-color="#16915F"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="500" fill="url(#background)"/>
+  <circle cx="930" cy="40" r="230" fill="#FFFFFF" opacity="0.05"/>
+  <circle cx="900" cy="470" r="190" fill="#FFFFFF" opacity="0.04"/>
+  <rect x="70" y="86" width="328" height="328" rx="78" fill="#FFF9EE"/>
+  <image href="../../app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" x="70" y="86" width="328" height="328"/>
+  <text x="440" y="215" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="56" font-weight="700">Quick Customer</text>
+  <text x="444" y="274" fill="#DDF7EA" font-family="Arial, sans-serif" font-size="26" font-weight="600">Offline billing for everyday business</text>
+  <text x="444" y="330" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="21">Billing  •  Expenses  •  Inventory  •  Reports</text>
+  <text x="444" y="374" fill="#DDF7EA" font-family="Arial, sans-serif" font-size="19">Phones and tablets  •  Optional receipt printing</text>
+</svg>

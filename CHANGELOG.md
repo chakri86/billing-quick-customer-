@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 — Play Store preparation
+
+- Standardized the application ID, namespace, source packages, theme, application class, database name, and invoice prefix under the Quick Customer identity.
+- Added secure optional upload-key configuration without storing signing secrets in GitHub.
+- Added an unsigned release AAB to normal CI and a manual signed-AAB workflow using GitHub Actions secrets.
+- Added in-app privacy-policy access and a protected option to erase all local application data.
+- Added the public privacy policy, store listing, Data Safety worksheet, reviewer instructions, and Play release checklist.
+- Kept Android 8/API 26 minimum support and Android 16/API 36 target support.
+
 ## 0.6.1 — Custom reporting and expense dates
 
 - Added an inclusive custom From/To date range to Sales and Expenses reports.
@@ -71,9 +80,8 @@
 
 ## 0.2.1 — Quick Customer branding
 
-- Renamed the visible application brand from Chai Duniya to Quick Customer.
-- Updated the launcher label, login screen, default shop name, and branded menu entries.
-- Added a safe one-time update for existing local installations while preserving bills and settings.
+- Standardized the launcher label, login screen, default shop name, and branded menu entries.
+- Preserved local bills and settings during the branding update.
 
 ## 0.2.0 — Local shop workflow
 
