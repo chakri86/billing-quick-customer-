@@ -285,10 +285,14 @@ class BillingRepository(private val db: AppDatabase) {
         amountPaise: Long,
         paymentMethod: PaymentMethod,
         supplierName: String,
-        description: String
+        description: String,
+        occurredAt: Long
     ) = db.withTransaction {
         require(amountPaise > 0) { "Expense amount must be greater than zero." }
         require(category.isNotBlank()) { "Choose an expense category." }
+        val expenseDate = java.time.Instant.ofEpochMilli(occurredAt)
+            .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        require(!expenseDate.isAfter(java.time.LocalDate.now())) { "Expense date cannot be in the future." }
         val approved = actor.role != UserRole.EMPLOYEE
         val now = System.currentTimeMillis()
         db.expenseDao().insert(
@@ -296,7 +300,7 @@ class BillingRepository(private val db: AppDatabase) {
                 id = UUID.randomUUID().toString(),
                 category = category.trim(),
                 amountPaise = amountPaise,
-                occurredAt = now,
+                occurredAt = occurredAt,
                 paymentMethod = paymentMethod,
                 supplierName = supplierName.trim(),
                 description = description.trim(),

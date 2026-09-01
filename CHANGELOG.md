@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.1 — Custom reporting and expense dates
+
+- Added an inclusive custom From/To date range to Sales and Expenses reports.
+- Added a selectable expense date that defaults to today and allows backdated entries.
+- Prevented future-dated expenses.
+- Kept the selected expense date separate from the actual entry timestamp for audit accuracy.
+- Updated expense rows to display both the financial date and actual entry details.
+- Preserved all existing bills, expenses, inventory, users, settings, and approval rules without a database migration.
+
 ## 0.6.0 — Expenses and hybrid inventory
 
 - Added role-aware expense entry with optional supplier and description fields.

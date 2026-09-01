@@ -2,7 +2,7 @@ name: Android Build
 
 on:
   push:
-    branches: [main, feature/expenses-inventory-v0.6.0]
+    branches: [main, feature/custom-date-v0.6.1]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
       - name: Upload APK and Room schemas
         uses: actions/upload-artifact@v4
         with:
-          name: quick-customer-v0.6.0-debug
+          name: quick-customer-v0.6.1-debug
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/schemas/
