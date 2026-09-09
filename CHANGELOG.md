@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1 — Period-aware top products
+
+- Made Top Products follow the selected Sales period: Today, 7 days, 30 days, Custom, or All time.
+- Added Top 10, Top 20, Top 30, Top 50, and All result-count choices.
+- Excluded cancelled and out-of-period bills from product rankings.
+- Kept historical product-name and price snapshots intact for accurate reporting after catalog edits.
+
 ## 0.7.0 — Play Store preparation
 
 - Standardized the application ID, namespace, source packages, theme, application class, database name, and invoice prefix under the Quick Customer identity.

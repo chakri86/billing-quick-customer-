@@ -74,6 +74,7 @@ interface CategoryDao {
 @Dao
 interface SaleDao {
     @Query("SELECT * FROM sales ORDER BY createdAt DESC") fun observeAll(): Flow<List<SaleEntity>>
+    @Query("SELECT * FROM sale_items ORDER BY rowid") fun observeAllItems(): Flow<List<SaleItemEntity>>
     @Query("SELECT COUNT(*) FROM sales WHERE syncStatus != 'SYNCED'") fun observePendingCount(): Flow<Int>
     @Query("SELECT * FROM sale_items WHERE saleId = :saleId ORDER BY rowid")
     suspend fun itemsForSale(saleId: String): List<SaleItemEntity>

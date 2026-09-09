@@ -24,6 +24,7 @@ import com.quickcustomer.billing.data.StockTransactionType
 import com.quickcustomer.billing.data.ProductEntity
 import com.quickcustomer.billing.data.Receipt
 import com.quickcustomer.billing.data.SaleEntity
+import com.quickcustomer.billing.data.SaleItemEntity
 import com.quickcustomer.billing.data.ShopSettingsEntity
 import com.quickcustomer.billing.data.ProductSalesSummary
 import com.quickcustomer.billing.data.UserEntity
@@ -64,6 +65,9 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
     val sales: StateFlow<List<SaleEntity>> = repository.sales.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+    val saleItems: StateFlow<List<SaleItemEntity>> = repository.saleItems.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
     val pendingSyncCount: StateFlow<Int> = repository.pendingSyncCount.stateIn(

@@ -17,6 +17,7 @@ class BillingRepository(private val db: AppDatabase) {
     val categories: Flow<List<CategoryEntity>> = db.categoryDao().observeAll()
     val users: Flow<List<UserEntity>> = db.userDao().observeAll()
     val sales: Flow<List<SaleEntity>> = db.saleDao().observeAll()
+    val saleItems: Flow<List<SaleItemEntity>> = db.saleDao().observeAllItems()
     val pendingSyncCount: Flow<Int> = db.saleDao().observePendingCount()
     val settings: Flow<ShopSettingsEntity?> = db.settingsDao().observe()
     val productSales: Flow<List<ProductSalesSummary>> = db.saleDao().observeProductSales()

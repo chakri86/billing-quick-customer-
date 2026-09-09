@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.7.0
+## Included in version 0.7.1
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -36,6 +36,7 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Employee expense entry with Admin/Super User approval
 - Approved-expense and sales-minus-expenses reports
 - Inclusive custom From/To date ranges for Sales and Expenses reports
+- Period-aware Top Products reporting with Top 10, 20, 30, 50, and All choices
 - Backdated expense entry with a separate, immutable audit-entry timestamp
 - Hybrid inventory for packaged stock and recipe ingredients
 - Low-stock warnings that never interrupt billing
