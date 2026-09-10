@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.8.1
+## Included in version 0.9.0
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -50,8 +50,14 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Complete Quick Customer application identity using package ID `com.quickcustomer.billing`
 - In-app privacy-policy access and permanent local-data deletion
 - Play Store listing, Data Safety worksheet, reviewer instructions, release checklist, and signed-AAB workflow
+- First-install connection to a dedicated store Gmail account
+- Private Google Drive `appDataFolder` backup and whole-store synchronization
+- Automatic new-store detection and first Super User setup after Drive connection
+- Existing-store restore when the same store Gmail is connected on another device
+- One primary billing device with additional read-only monitoring devices
+- Manual refresh plus two-minute foreground refresh on monitoring devices
 
-Cloud API synchronization is scheduled after the local billing and printer workflows are accepted. Bills are already marked with sync state, business ID, shop ID, and device ID so cloud sync does not require a database redesign.
+Version 0.9.0 adds owner-controlled synchronization through the dedicated store Google account. The primary device continues to save every operation locally first and uploads a store snapshot after changes. Monitoring devices download that snapshot and cannot create or modify business records.
 
 ## Open in Android Studio
 
@@ -65,9 +71,11 @@ Cloud API synchronization is scheduled after the local billing and printer workf
 
 The first build downloads Android and Kotlin dependencies and can take several minutes.
 
-## First-run owner setup
+## First-run store and owner setup
 
-A fresh installation asks the shop owner to create the first Super User username and password. No default credentials, password hashes, or password salts are published in this repository. The Super User can then create Admin and Employee accounts from the Users screen. Existing installations retain their current users and local bills.
+A fresh installation first asks the owner to connect the dedicated store Gmail and authorize Quick Customer's private Drive application-data folder. If no existing store snapshot is found, the app asks the owner to create the first Super User. If a snapshot exists, the app restores it and asks for an existing Quick Customer user login. No default credentials, password hashes, or password salts are published in this repository.
+
+Google authorization requires one manual Cloud Console setup before Drive testing. Follow [docs/GOOGLE_DRIVE_SETUP.md](docs/GOOGLE_DRIVE_SETUP.md). Device-only mode remains available when Drive is not required.
 
 ## Recommended emulator matrix
 
