@@ -138,10 +138,55 @@ class AppDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migrate6To7BackfillsSaleItemCategorySnapshots() {
+        helper.createDatabase(TEST_DB_V6, 6).apply {
+            execSQL(
+                """
+                INSERT INTO products (
+                    id, category, name, pricePaise, sortOrder, isActive, updatedAt, syncStatus, isDeleted
+                ) VALUES (
+                    'product-1', 'Teas', 'Dum Tea', 2000, 0, 1, 1000, 'PENDING', 0
+                )
+                """.trimIndent()
+            )
+            execSQL(
+                """
+                INSERT INTO sales (
+                    id, businessId, shopId, deviceId, invoiceNumber, createdAt,
+                    cashierId, cashierName, subtotalPaise, discountPaise, taxPaise,
+                    totalPaise, paymentMethod, cashReceivedPaise, changeReturnedPaise,
+                    isCancelled, cancelledAt, cancelledById, cancelledByName,
+                    cancellationReason, syncStatus
+                ) VALUES ('sale-v6', 'business-demo', 'shop-main', 'device-1', 'QC-V6', 1000,
+                    'cashier', 'Cashier', 2000, 0, 0, 2000, 'CASH', 2000, 0,
+                    0, NULL, NULL, NULL, NULL, 'PENDING')
+                """.trimIndent()
+            )
+            execSQL(
+                """
+                INSERT INTO sale_items (
+                    id, saleId, productId, productNameSnapshot, unitPricePaise,
+                    quantity, lineTotalPaise, costTotalPaise, costConfigured
+                ) VALUES ('line-v6', 'sale-v6', 'product-1', 'Dum Tea', 2000, 1, 2000, 0, 0)
+                """.trimIndent()
+            )
+            close()
+        }
+
+        helper.runMigrationsAndValidate(TEST_DB_V6, 7, true, AppDatabase.MIGRATION_6_7).use { db ->
+            db.query("SELECT categorySnapshot FROM sale_items WHERE id = 'line-v6'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("Teas", cursor.getString(0))
+            }
+        }
+    }
+
     companion object {
         private const val TEST_DB = "quick-customer-migration-v1-test"
         private const val TEST_DB_V2 = "quick-customer-migration-v2-test"
         private const val TEST_DB_V4 = "quick-customer-migration-v4-test"
         private const val TEST_DB_V5 = "quick-customer-migration-v5-test"
+        private const val TEST_DB_V6 = "quick-customer-migration-v6-test"
     }
 }

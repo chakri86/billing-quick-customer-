@@ -78,6 +78,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
@@ -954,8 +956,10 @@ private fun ReceiptDialog(
 private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
     val allSales by viewModel.sales.collectAsState()
     val allExpenses by viewModel.expenses.collectAsState()
+    val configuredCategories by viewModel.categories.collectAsState()
     var period by remember { mutableStateOf(ReportPeriod.TODAY) }
-    var topProductLimit by remember { mutableStateOf(TopProductLimit.TOP_10) }
+    var topProductLimit by remember { mutableStateOf(TopProductLimit.ALL) }
+    var selectedProductCategory by remember { mutableStateOf<String?>(null) }
     var customWindow by remember { mutableStateOf(todayWindow()) }
     var showCustomDates by remember { mutableStateOf(false) }
     val reportWindow = when (period) {
@@ -975,9 +979,18 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
     }
     val productSales by productSalesFlow.collectAsState(initial = emptyList())
     val productProfit by productProfitFlow.collectAsState(initial = emptyList())
-    val displayedProductSales = topProductLimit.count?.let { productSales.take(it) } ?: productSales
+    val categoryOptions = remember(configuredCategories, productSales) {
+        (configuredCategories.map { it.name } + productSales.map { it.category })
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
+    val categoryProductSales = selectedProductCategory?.let { category ->
+        productSales.filter { it.category == category }
+    } ?: productSales
+    val displayedProductSales = topProductLimit.count?.let { categoryProductSales.take(it) } ?: categoryProductSales
     val displayedProductProfit = productProfit
         .filter { it.costConfiguredCount > 0 }
+        .filter { selectedProductCategory == null || it.category == selectedProductCategory }
         .let { products -> topProductLimit.count?.let { products.take(it) } ?: products }
     val roleSales = if (user.role == UserRole.EMPLOYEE) allSales.filter { it.cashierId == user.id } else allSales
     val sales = roleSales.filter { reportWindow == null || reportWindow.contains(it.createdAt) }
@@ -1039,20 +1052,24 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
                     Text("Top products (${period.label.lowercase()})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
                 item {
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(TopProductLimit.entries) { item ->
-                            FilterChip(
-                                selected = topProductLimit == item,
-                                onClick = { topProductLimit = item },
-                                label = { Text(item.label) }
-                            )
-                        }
+                    TopProductControls(
+                        selectedLimit = topProductLimit,
+                        onLimitSelected = { topProductLimit = it },
+                        categories = categoryOptions,
+                        selectedCategory = selectedProductCategory,
+                        onCategorySelected = { selectedProductCategory = it }
+                    )
+                }
+                if (displayedProductSales.isEmpty()) {
+                    item {
+                        Text(
+                            "No products sold in this category for ${period.label.lowercase()}.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
                     }
                 }
-                items(displayedProductSales, key = { "product-${it.productName}" }) { item ->
+                items(displayedProductSales, key = { "product-${it.category}-${it.productName}" }) { item ->
                     ListItem(
                         headlineContent = { Text(item.productName) },
                         supportingContent = { Text("${item.quantity} sold") },
@@ -1061,7 +1078,7 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
                 }
                 if (displayedProductProfit.isNotEmpty()) {
                     item { Text("Product profit (${period.label.lowercase()})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp)) }
-                    items(displayedProductProfit, key = { "profit-${it.productName}" }) { item ->
+                    items(displayedProductProfit, key = { "profit-${it.category}-${it.productName}" }) { item ->
                         ListItem(
                             headlineContent = { Text(item.productName) },
                             supportingContent = { Text(if (item.costConfiguredCount == item.lineCount) "Cost fully configured" else "Partial cost data") },
@@ -1117,6 +1134,98 @@ private enum class TopProductLimit(val label: String, val count: Int?) {
     TOP_30("Top 30", 30),
     TOP_50("Top 50", 50),
     ALL("All", null)
+}
+
+@Composable
+private fun TopProductControls(
+    selectedLimit: TopProductLimit,
+    onLimitSelected: (TopProductLimit) -> Unit,
+    categories: List<String>,
+    selectedCategory: String?,
+    onCategorySelected: (String?) -> Unit
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        if (maxWidth >= 600.dp) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TopProductLimitChips(selectedLimit, onLimitSelected, Modifier.weight(1f))
+                ProductCategoryDropdown(
+                    categories = categories,
+                    selectedCategory = selectedCategory,
+                    onCategorySelected = onCategorySelected,
+                    modifier = Modifier.widthIn(min = 180.dp, max = 260.dp)
+                )
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TopProductLimitChips(selectedLimit, onLimitSelected, Modifier.fillMaxWidth())
+                ProductCategoryDropdown(
+                    categories = categories,
+                    selectedCategory = selectedCategory,
+                    onCategorySelected = onCategorySelected,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TopProductLimitChips(
+    selectedLimit: TopProductLimit,
+    onLimitSelected: (TopProductLimit) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyRow(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(TopProductLimit.entries) { item ->
+            FilterChip(
+                selected = selectedLimit == item,
+                onClick = { onLimitSelected(item) },
+                label = { Text(item.label) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductCategoryDropdown(
+    categories: List<String>,
+    selectedCategory: String?,
+    onCategorySelected: (String?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier) {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(selectedCategory ?: "All categories", modifier = Modifier.weight(1f))
+            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Choose category")
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.widthIn(min = 180.dp)
+        ) {
+            DropdownMenuItem(
+                text = { Text("All categories") },
+                onClick = {
+                    onCategorySelected(null)
+                    expanded = false
+                }
+            )
+            categories.forEach { category ->
+                DropdownMenuItem(
+                    text = { Text(category) },
+                    onClick = {
+                        onCategorySelected(category)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
 }
 
 @Composable

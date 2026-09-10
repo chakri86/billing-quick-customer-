@@ -92,6 +92,7 @@ data class SaleItemEntity(
     val saleId: String,
     val productId: String,
     val productNameSnapshot: String,
+    @ColumnInfo(defaultValue = "''") val categorySnapshot: String = "",
     val unitPricePaise: Long,
     val quantity: Int,
     val lineTotalPaise: Long,
@@ -247,7 +248,8 @@ data class AuditLogEntity(
 data class ProductSalesSummary(
     val productName: String,
     val quantity: Long,
-    val revenuePaise: Long
+    val revenuePaise: Long,
+    val category: String = ""
 )
 
 data class ProductProfitSummary(
@@ -256,7 +258,8 @@ data class ProductProfitSummary(
     val revenuePaise: Long,
     val costPaise: Long,
     val costConfiguredCount: Long,
-    val lineCount: Long
+    val lineCount: Long,
+    val category: String = ""
 )
 
 object ExpenseCategories {

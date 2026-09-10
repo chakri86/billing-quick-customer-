@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.1 — Category-filtered product rankings
+
+- Made All the default Top products result size.
+- Added an adaptive category dropdown beside the Top products controls.
+- Added category snapshots to sale items so future product-category changes do not rewrite historical reporting.
+- Added a Room 6-to-7 migration that backfills existing product categories without losing bills.
+
 ## 0.8.0 — Period-aware top products
 
 - Made Top products follow the selected Sales period: Today, 7 days, 30 days, Custom, or All time.

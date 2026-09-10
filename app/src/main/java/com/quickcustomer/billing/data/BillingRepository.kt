@@ -186,6 +186,7 @@ class BillingRepository(private val db: AppDatabase) {
                 saleId = saleId,
                 productId = line.product.id,
                 productNameSnapshot = line.product.name,
+                categorySnapshot = line.product.category,
                 unitPricePaise = line.product.pricePaise,
                 quantity = line.quantity,
                 lineTotalPaise = line.lineTotalPaise,

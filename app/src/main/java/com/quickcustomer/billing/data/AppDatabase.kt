@@ -81,12 +81,13 @@ interface SaleDao {
         """
         SELECT si.productNameSnapshot AS productName,
                SUM(si.quantity) AS quantity,
-               SUM(si.lineTotalPaise) AS revenuePaise
+               SUM(si.lineTotalPaise) AS revenuePaise,
+               si.categorySnapshot AS category
         FROM sale_items si
         INNER JOIN sales s ON s.id = si.saleId
         WHERE s.isCancelled = 0
-        GROUP BY si.productNameSnapshot
-        ORDER BY quantity DESC, productName ASC
+        GROUP BY si.categorySnapshot, si.productNameSnapshot
+        ORDER BY quantity DESC, revenuePaise DESC, productName ASC
         """
     )
     fun observeProductSales(): Flow<List<ProductSalesSummary>>
@@ -94,13 +95,14 @@ interface SaleDao {
         """
         SELECT si.productNameSnapshot AS productName,
                SUM(si.quantity) AS quantity,
-               SUM(si.lineTotalPaise) AS revenuePaise
+               SUM(si.lineTotalPaise) AS revenuePaise,
+               si.categorySnapshot AS category
         FROM sale_items si
         INNER JOIN sales s ON s.id = si.saleId
         WHERE s.isCancelled = 0
           AND s.createdAt >= :startInclusive
           AND s.createdAt < :endExclusive
-        GROUP BY si.productNameSnapshot
+        GROUP BY si.categorySnapshot, si.productNameSnapshot
         ORDER BY quantity DESC, revenuePaise DESC, productName ASC
         """
     )
@@ -117,11 +119,12 @@ interface SaleDao {
                    ELSE 0 END) AS revenuePaise,
                SUM(si.costTotalPaise) AS costPaise,
                SUM(CASE WHEN si.costConfigured = 1 THEN 1 ELSE 0 END) AS costConfiguredCount,
-               COUNT(*) AS lineCount
+               COUNT(*) AS lineCount,
+               si.categorySnapshot AS category
         FROM sale_items si
         INNER JOIN sales s ON s.id = si.saleId
         WHERE s.isCancelled = 0
-        GROUP BY si.productNameSnapshot
+        GROUP BY si.categorySnapshot, si.productNameSnapshot
         ORDER BY revenuePaise DESC, productName ASC
         """
     )
@@ -135,13 +138,14 @@ interface SaleDao {
                    ELSE 0 END) AS revenuePaise,
                SUM(si.costTotalPaise) AS costPaise,
                SUM(CASE WHEN si.costConfigured = 1 THEN 1 ELSE 0 END) AS costConfiguredCount,
-               COUNT(*) AS lineCount
+               COUNT(*) AS lineCount,
+               si.categorySnapshot AS category
         FROM sale_items si
         INNER JOIN sales s ON s.id = si.saleId
         WHERE s.isCancelled = 0
           AND s.createdAt >= :startInclusive
           AND s.createdAt < :endExclusive
-        GROUP BY si.productNameSnapshot
+        GROUP BY si.categorySnapshot, si.productNameSnapshot
         ORDER BY revenuePaise DESC, productName ASC
         """
     )
@@ -272,7 +276,7 @@ interface InventoryDao {
         StockTransactionEntity::class,
         RecipeIngredientEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 @TypeConverters(DbConverters::class)
@@ -294,7 +298,14 @@ abstract class AppDatabase : RoomDatabase() {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "quick-customer-billing.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            ).addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7
+            )
                 .build()
                 .also { instance = it }
         }
@@ -437,6 +448,24 @@ abstract class AppDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_recipe_ingredients_inventoryItemId ON recipe_ingredients(inventoryItemId)")
+            }
+        }
+
+        internal val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sale_items ADD COLUMN categorySnapshot TEXT NOT NULL DEFAULT ''")
+                db.execSQL(
+                    """
+                    UPDATE sale_items
+                    SET categorySnapshot = CASE
+                        WHEN productId LIKE 'misc-%' THEN 'Misc'
+                        ELSE COALESCE(
+                            (SELECT p.category FROM products p WHERE p.id = sale_items.productId),
+                            'Uncategorized'
+                        )
+                    END
+                    """.trimIndent()
+                )
             }
         }
     }
