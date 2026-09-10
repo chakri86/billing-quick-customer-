@@ -2,7 +2,7 @@
 
 Use this worksheet when completing **Policy and programs → App content → Data safety**. Recheck every answer against the final release and all future SDKs before submitting.
 
-## Current version 0.7.0
+## Current version 0.8.0
 
 - Third-party advertising SDKs: No
 - Analytics SDKs: No
@@ -24,7 +24,7 @@ The app stores account identifiers, shop contact details, financial transaction 
 - `BLUETOOTH` and `BLUETOOTH_ADMIN` are limited to Android 11/API 30 and older.
 - `BLUETOOTH_CONNECT` supports optional paired-printer use on Android 12 and newer.
 - Bluetooth hardware is marked optional.
-- `INTERNET` and `ACCESS_NETWORK_STATE` are present for policy access and the planned synchronization foundation; version 0.7.0 has no server synchronization.
+- `INTERNET` and `ACCESS_NETWORK_STATE` are present for policy access and the planned synchronization foundation; version 0.8.0 has no server synchronization.
 
 ## Recheck before every release
 

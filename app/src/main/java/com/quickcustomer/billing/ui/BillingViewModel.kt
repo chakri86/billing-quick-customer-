@@ -34,6 +34,7 @@ import com.quickcustomer.billing.printing.BluetoothPrinterManager
 import com.quickcustomer.billing.printing.PairedBluetoothPrinter
 import com.quickcustomer.billing.printing.PrintableReceipt
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -90,6 +91,12 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     val recipeDetails: StateFlow<List<RecipeIngredientDetail>> = repository.recipeDetails.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
+
+    fun productSalesInRange(startInclusive: Long, endExclusive: Long): Flow<List<ProductSalesSummary>> =
+        repository.productSalesInRange(startInclusive, endExclusive)
+
+    fun productProfitInRange(startInclusive: Long, endExclusive: Long): Flow<List<ProductProfitSummary>> =
+        repository.productProfitInRange(startInclusive, endExclusive)
 
     var currentUser by mutableStateOf<UserEntity?>(null)
         private set

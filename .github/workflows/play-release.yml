@@ -57,7 +57,7 @@ jobs:
       - name: Upload signed Play bundle
         uses: actions/upload-artifact@v4
         with:
-          name: quick-customer-v0.7.0-signed-aab
+          name: quick-customer-v0.8.0-signed-aab
           path: app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 14

@@ -94,6 +94,24 @@ interface SaleDao {
         """
         SELECT si.productNameSnapshot AS productName,
                SUM(si.quantity) AS quantity,
+               SUM(si.lineTotalPaise) AS revenuePaise
+        FROM sale_items si
+        INNER JOIN sales s ON s.id = si.saleId
+        WHERE s.isCancelled = 0
+          AND s.createdAt >= :startInclusive
+          AND s.createdAt < :endExclusive
+        GROUP BY si.productNameSnapshot
+        ORDER BY quantity DESC, revenuePaise DESC, productName ASC
+        """
+    )
+    fun observeProductSalesInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): Flow<List<ProductSalesSummary>>
+    @Query(
+        """
+        SELECT si.productNameSnapshot AS productName,
+               SUM(si.quantity) AS quantity,
                SUM(CASE WHEN s.subtotalPaise > 0
                    THEN ((s.totalPaise - s.taxPaise) * si.lineTotalPaise / s.subtotalPaise)
                    ELSE 0 END) AS revenuePaise,
@@ -108,6 +126,29 @@ interface SaleDao {
         """
     )
     fun observeProductProfit(): Flow<List<ProductProfitSummary>>
+    @Query(
+        """
+        SELECT si.productNameSnapshot AS productName,
+               SUM(si.quantity) AS quantity,
+               SUM(CASE WHEN s.subtotalPaise > 0
+                   THEN ((s.totalPaise - s.taxPaise) * si.lineTotalPaise / s.subtotalPaise)
+                   ELSE 0 END) AS revenuePaise,
+               SUM(si.costTotalPaise) AS costPaise,
+               SUM(CASE WHEN si.costConfigured = 1 THEN 1 ELSE 0 END) AS costConfiguredCount,
+               COUNT(*) AS lineCount
+        FROM sale_items si
+        INNER JOIN sales s ON s.id = si.saleId
+        WHERE s.isCancelled = 0
+          AND s.createdAt >= :startInclusive
+          AND s.createdAt < :endExclusive
+        GROUP BY si.productNameSnapshot
+        ORDER BY revenuePaise DESC, productName ASC
+        """
+    )
+    fun observeProductProfitInRange(
+        startInclusive: Long,
+        endExclusive: Long
+    ): Flow<List<ProductProfitSummary>>
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertSale(sale: SaleEntity)
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertItems(items: List<SaleItemEntity>)
     @Query(

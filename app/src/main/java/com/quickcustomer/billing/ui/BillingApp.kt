@@ -953,10 +953,9 @@ private fun ReceiptDialog(
 @Composable
 private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
     val allSales by viewModel.sales.collectAsState()
-    val productSales by viewModel.productSales.collectAsState()
-    val productProfit by viewModel.productProfit.collectAsState()
     val allExpenses by viewModel.expenses.collectAsState()
     var period by remember { mutableStateOf(ReportPeriod.TODAY) }
+    var topProductLimit by remember { mutableStateOf(TopProductLimit.TOP_10) }
     var customWindow by remember { mutableStateOf(todayWindow()) }
     var showCustomDates by remember { mutableStateOf(false) }
     val reportWindow = when (period) {
@@ -966,6 +965,20 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
         ReportPeriod.CUSTOM -> customWindow
         ReportPeriod.ALL_TIME -> null
     }
+    val productStart = reportWindow?.startInclusive ?: 0L
+    val productEnd = reportWindow?.endExclusive ?: Long.MAX_VALUE
+    val productSalesFlow = remember(productStart, productEnd) {
+        viewModel.productSalesInRange(productStart, productEnd)
+    }
+    val productProfitFlow = remember(productStart, productEnd) {
+        viewModel.productProfitInRange(productStart, productEnd)
+    }
+    val productSales by productSalesFlow.collectAsState(initial = emptyList())
+    val productProfit by productProfitFlow.collectAsState(initial = emptyList())
+    val displayedProductSales = topProductLimit.count?.let { productSales.take(it) } ?: productSales
+    val displayedProductProfit = productProfit
+        .filter { it.costConfiguredCount > 0 }
+        .let { products -> topProductLimit.count?.let { products.take(it) } ?: products }
     val roleSales = if (user.role == UserRole.EMPLOYEE) allSales.filter { it.cashierId == user.id } else allSales
     val sales = roleSales.filter { reportWindow == null || reportWindow.contains(it.createdAt) }
     val validSales = sales.filterNot { it.isCancelled }
@@ -1023,18 +1036,32 @@ private fun SalesScreen(viewModel: BillingViewModel, user: UserEntity) {
         else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (user.role != UserRole.EMPLOYEE && productSales.isNotEmpty()) {
                 item {
-                    Text("Top products (all time)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Top products (${period.label.lowercase()})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
-                items(productSales.take(8), key = { "product-${it.productName}" }) { item ->
+                item {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(TopProductLimit.entries) { item ->
+                            FilterChip(
+                                selected = topProductLimit == item,
+                                onClick = { topProductLimit = item },
+                                label = { Text(item.label) }
+                            )
+                        }
+                    }
+                }
+                items(displayedProductSales, key = { "product-${it.productName}" }) { item ->
                     ListItem(
                         headlineContent = { Text(item.productName) },
                         supportingContent = { Text("${item.quantity} sold") },
                         trailingContent = { Text(Money.format(item.revenuePaise), fontWeight = FontWeight.SemiBold) }
                     )
                 }
-                if (productProfit.any { it.costConfiguredCount > 0 }) {
-                    item { Text("Product profit (all time)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp)) }
-                    items(productProfit.filter { it.costConfiguredCount > 0 }.take(8), key = { "profit-${it.productName}" }) { item ->
+                if (displayedProductProfit.isNotEmpty()) {
+                    item { Text("Product profit (${period.label.lowercase()})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp)) }
+                    items(displayedProductProfit, key = { "profit-${it.productName}" }) { item ->
                         ListItem(
                             headlineContent = { Text(item.productName) },
                             supportingContent = { Text(if (item.costConfiguredCount == item.lineCount) "Cost fully configured" else "Partial cost data") },
@@ -1082,6 +1109,14 @@ private enum class ReportPeriod(val label: String) {
     LAST_30_DAYS("30 days"),
     CUSTOM("Custom"),
     ALL_TIME("All time");
+}
+
+private enum class TopProductLimit(val label: String, val count: Int?) {
+    TOP_10("Top 10", 10),
+    TOP_20("Top 20", 20),
+    TOP_30("Top 30", 30),
+    TOP_50("Top 50", 50),
+    ALL("All", null)
 }
 
 @Composable

@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.7.0
+## Included in version 0.8.0
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -31,7 +31,8 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Role-filtered sales history with Today, 7-day, 30-day, and all-time totals
 - Tappable historical bills with full receipt, payment, cancellation, and sync details
 - Custom Quick Customer launcher icon for phones and tablets
-- Cash/UPI/Card, discount, tax, cancellation, and top-product summaries
+- Cash/UPI/Card, discount, tax, cancellation, and period-aware top-product summaries
+- Top 10, Top 20, Top 30, Top 50, and All product-ranking controls
 - Pending-sync status and future multi-shop identifiers
 - Employee expense entry with Admin/Super User approval
 - Approved-expense and sales-minus-expenses reports

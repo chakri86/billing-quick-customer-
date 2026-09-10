@@ -27,6 +27,12 @@ class BillingRepository(private val db: AppDatabase) {
     val stockTransactions: Flow<List<StockTransactionEntity>> = db.inventoryDao().observeTransactions()
     val recipeDetails: Flow<List<RecipeIngredientDetail>> = db.inventoryDao().observeRecipeDetails()
 
+    fun productSalesInRange(startInclusive: Long, endExclusive: Long): Flow<List<ProductSalesSummary>> =
+        db.saleDao().observeProductSalesInRange(startInclusive, endExclusive)
+
+    fun productProfitInRange(startInclusive: Long, endExclusive: Long): Flow<List<ProductProfitSummary>> =
+        db.saleDao().observeProductProfitInRange(startInclusive, endExclusive)
+
     suspend fun ensureSeeded() = db.withTransaction {
         if (db.productDao().count() == 0) {
             db.productDao().insertAll(SeedData.products())
