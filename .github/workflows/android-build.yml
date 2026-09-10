@@ -39,12 +39,18 @@ jobs:
       - name: Build unsigned Play bundle
         run: ./gradlew bundleRelease
 
-      - name: Upload APK, AAB, and Room schemas
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: quick-customer-v0.8.0-build
+          name: quick-customer-v0.8.0-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload Play bundle and Room schemas
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-customer-v0.8.0-play-bundle
           path: |
-            app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/bundle/release/app-release.aab
             app/schemas/
           if-no-files-found: error
