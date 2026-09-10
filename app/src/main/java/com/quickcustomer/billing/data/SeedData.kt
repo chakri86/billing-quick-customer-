@@ -1,0 +1,92 @@
+package com.quickcustomer.billing.data
+
+import java.util.UUID
+
+object SeedData {
+    data class MenuItem(val category: String, val name: String, val rupees: Int)
+
+    val menu = listOf(
+        MenuItem("Teas", "Dum Tea", 12),
+        MenuItem("Teas", "Ginger Tea", 15),
+        MenuItem("Teas", "Kadak Chai", 15),
+        MenuItem("Teas", "Quick Customer Spl Tea", 20),
+        MenuItem("Teas", "Allam Bellam Tea", 20),
+        MenuItem("Teas", "Bellam Tea", 20),
+        MenuItem("Teas", "Ginger & Elaichi", 20),
+        MenuItem("Teas", "Elaichi Chai", 20),
+        MenuItem("Teas", "Badam Tea", 20),
+        MenuItem("Teas", "Masala Tea", 20),
+        MenuItem("Teas", "Kashmir Tea", 20),
+        MenuItem("Teas", "Sonti Chai", 20),
+        MenuItem("Herbal Teas", "Lemon Tea", 20),
+        MenuItem("Herbal Teas", "Green Tea", 20),
+        MenuItem("Herbal Teas", "Black Tea", 20),
+        MenuItem("Herbal Teas", "Sabja Lemon Tea", 20),
+        MenuItem("Herbal Teas", "Lemon Ginger", 20),
+        MenuItem("Coffees", "BRU Coffee", 20),
+        MenuItem("Coffees", "Chocolate Coffee", 20),
+        MenuItem("Coffees", "Black Coffee", 20),
+        MenuItem("Coffees", "Sukku Coffee (Sonti)", 25),
+        MenuItem("Coffees", "Dark Hot Coffee", 25),
+        MenuItem("Milk", "Milk", 15),
+        MenuItem("Milk", "Rose Milk", 15),
+        MenuItem("Milk", "Boost", 20),
+        MenuItem("Milk", "Horlicks", 20),
+        MenuItem("Milk", "Bournvita", 20),
+        MenuItem("Milk", "Pista Badam", 20),
+        MenuItem("Milk", "Chocolate Milk", 20),
+        MenuItem("Milk", "Pepper Milk", 20),
+        MenuItem("Milk", "Badam Milk", 20),
+        MenuItem("Flavoured Milk", "Chilled Badam Milk", 55),
+        MenuItem("Flavoured Milk", "Rose Milk", 55),
+        MenuItem("Flavoured Milk", "Cold Coffee", 55),
+        MenuItem("Special Shakes", "Rasmalai", 59),
+        MenuItem("Special Shakes", "Kulfi", 59),
+        MenuItem("Special Shakes", "Black Current", 59),
+        MenuItem("Special Shakes", "American", 69),
+        MenuItem("Special Shakes", "Red Velvet", 69),
+        MenuItem("Thick Shakes", "Vanilla Shake", 99),
+        MenuItem("Thick Shakes", "Strawberry Shake", 99),
+        MenuItem("Thick Shakes", "Butterscotch Shake", 99),
+        MenuItem("Thick Shakes", "Chocolate Shake", 109),
+        MenuItem("Thick Shakes", "Chocolate & Oreo", 109),
+        MenuItem("Thick Shakes", "Kitkat Shake", 109),
+        MenuItem("Milk Shakes", "Strawberry", 59),
+        MenuItem("Milk Shakes", "Chocolate", 59),
+        MenuItem("Milk Shakes", "Butterscotch", 59),
+        MenuItem("Milk Shakes", "Pista", 59),
+        MenuItem("Milk Shakes", "Vanilla", 59),
+        MenuItem("Milk Shakes", "Oreo", 59),
+        MenuItem("Milk Shakes", "Mango", 59),
+        MenuItem("Milk Shakes", "Kitkat", 59),
+        MenuItem("Milk Shakes", "Chocolate & Oreo", 69),
+        MenuItem("Milk Shakes", "Dry Fruit Milkshake", 109),
+        MenuItem("Lassis", "Sweet Lassi", 59),
+        MenuItem("Lassis", "Masala Lassi", 59),
+        MenuItem("Lassis", "Mango Lassi", 59),
+        MenuItem("Lassis", "Pineapple Lassi", 59),
+        MenuItem("Lassis", "Strawberry Lassi", 69),
+        MenuItem("Ice Creams", "Vanilla", 59),
+        MenuItem("Ice Creams", "Strawberry", 59),
+        MenuItem("Ice Creams", "Chocolate", 59),
+        MenuItem("Ice Creams", "Butterscotch", 69),
+        MenuItem("Mocktails", "Blue Mojito", 59),
+        MenuItem("Mocktails", "Rose Mojito", 59),
+        MenuItem("Mocktails", "Mint Lemon", 59),
+        MenuItem("Mocktails", "Strawberry Orange", 59),
+        MenuItem("Mocktails", "Green Apple", 69),
+        MenuItem("Snacks", "Osmania Biscuits", 5),
+        MenuItem("Snacks", "Samosa (2 pcs)", 15),
+        MenuItem("Snacks", "Corn Samosa", 15)
+    )
+
+    fun products(): List<ProductEntity> = menu.mapIndexed { index, item ->
+        ProductEntity(
+            id = UUID.nameUUIDFromBytes("${item.category}:${item.name}".toByteArray()).toString(),
+            category = item.category,
+            name = item.name,
+            pricePaise = item.rupees * 100L,
+            sortOrder = index
+        )
+    }
+}
