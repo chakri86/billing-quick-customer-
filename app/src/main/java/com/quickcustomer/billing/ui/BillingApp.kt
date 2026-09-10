@@ -177,9 +177,7 @@ fun BillingApp(viewModel: BillingViewModel) {
                 ?: error("Google Drive did not return an access token.")
             viewModel.connectGoogleDrive(token)
         } catch (failure: ApiException) {
-            viewModel.onDriveAuthorizationFailed(
-                failure.localizedMessage ?: "Google Drive authorization was cancelled."
-            )
+            viewModel.onDriveAuthorizationFailed(driveAuthorizationFailureMessage(failure))
         } catch (failure: Exception) {
             viewModel.onDriveAuthorizationFailed(
                 failure.localizedMessage ?: "Google Drive authorization was not completed."
@@ -222,9 +220,7 @@ fun BillingApp(viewModel: BillingViewModel) {
                     }
                 }
                 .addOnFailureListener { failure ->
-                    viewModel.onDriveAuthorizationFailed(
-                        failure.localizedMessage ?: "Google Drive authorization failed."
-                    )
+                    viewModel.onDriveAuthorizationFailed(driveAuthorizationFailureMessage(failure))
                 }
         }
     }
@@ -294,6 +290,16 @@ fun BillingApp(viewModel: BillingViewModel) {
             title = { Text("Printer") },
             text = { Text(message) }
         )
+    }
+}
+
+private fun driveAuthorizationFailureMessage(failure: Exception): String {
+    val raw = failure.localizedMessage.orEmpty()
+    return when {
+        raw.contains("UNREGISTERED_ON_API_CONSOLE", ignoreCase = true) ->
+            "Google authorization is not configured for this APK. Register com.quickcustomer.billing and this APK's SHA-1 in Google Cloud, then try again."
+        raw.isBlank() -> "Google Drive authorization was not completed."
+        else -> raw
     }
 }
 
