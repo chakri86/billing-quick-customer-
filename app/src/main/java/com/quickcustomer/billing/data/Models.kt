@@ -5,12 +5,19 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
 
+@Serializable
 enum class UserRole { SUPER_USER, ADMIN, EMPLOYEE }
+@Serializable
 enum class PaymentMethod { CASH, UPI, CARD }
+@Serializable
 enum class SyncStatus { PENDING, SYNCED, FAILED }
+@Serializable
 enum class ExpenseStatus { PENDING, APPROVED, REJECTED, CANCELLED }
+@Serializable
 enum class InventoryUnit { PIECE, PACKET, GRAM, KILOGRAM, MILLILITRE, LITRE, BOTTLE, BOX }
+@Serializable
 enum class StockTransactionType { OPENING, PURCHASE, SALE, WASTAGE, SUPPLIER_RETURN, ADJUSTMENT, SALE_CANCELLED }
 
 object BillingCategories {
@@ -18,6 +25,7 @@ object BillingCategories {
 }
 
 @Entity(tableName = "users", indices = [Index(value = ["username"], unique = true)])
+@Serializable
 data class UserEntity(
     @PrimaryKey val id: String,
     val username: String,
@@ -30,6 +38,7 @@ data class UserEntity(
 )
 
 @Entity(tableName = "products", indices = [Index(value = ["category", "sortOrder"])])
+@Serializable
 data class ProductEntity(
     @PrimaryKey val id: String,
     val category: String,
@@ -43,6 +52,7 @@ data class ProductEntity(
 )
 
 @Entity(tableName = "categories", indices = [Index(value = ["sortOrder"])])
+@Serializable
 data class CategoryEntity(
     @PrimaryKey val name: String,
     val sortOrder: Int,
@@ -51,6 +61,7 @@ data class CategoryEntity(
 )
 
 @Entity(tableName = "sales", indices = [Index(value = ["invoiceNumber"], unique = true)])
+@Serializable
 data class SaleEntity(
     @PrimaryKey val id: String,
     val businessId: String = "business-demo",
@@ -87,6 +98,7 @@ data class SaleEntity(
     ],
     indices = [Index("saleId"), Index("productId")]
 )
+@Serializable
 data class SaleItemEntity(
     @PrimaryKey val id: String,
     val saleId: String,
@@ -101,6 +113,7 @@ data class SaleItemEntity(
 )
 
 @Entity(tableName = "expenses", indices = [Index("occurredAt"), Index("status"), Index("enteredById")])
+@Serializable
 data class ExpenseEntity(
     @PrimaryKey val id: String,
     val category: String,
@@ -129,6 +142,7 @@ data class ExpenseEntity(
 )
 
 @Entity(tableName = "inventory_items", indices = [Index(value = ["name"], unique = true)])
+@Serializable
 data class InventoryItemEntity(
     @PrimaryKey val id: String,
     val name: String,
@@ -151,6 +165,7 @@ data class InventoryItemEntity(
     )],
     indices = [Index("inventoryItemId"), Index("saleId"), Index("expenseId"), Index("createdAt")]
 )
+@Serializable
 data class StockTransactionEntity(
     @PrimaryKey val id: String,
     val inventoryItemId: String,
@@ -172,6 +187,7 @@ data class StockTransactionEntity(
     primaryKeys = ["productId", "inventoryItemId"],
     indices = [Index("inventoryItemId")]
 )
+@Serializable
 data class RecipeIngredientEntity(
     val productId: String,
     val inventoryItemId: String,
@@ -214,6 +230,7 @@ data class BillDetails(
 )
 
 @Entity(tableName = "shop_settings")
+@Serializable
 data class ShopSettingsEntity(
     @PrimaryKey val id: Int = 1,
     val shopName: String = "Quick Customer",
@@ -233,6 +250,7 @@ data class ShopSettingsEntity(
 )
 
 @Entity(tableName = "audit_logs", indices = [Index("entityId"), Index("createdAt")])
+@Serializable
 data class AuditLogEntity(
     @PrimaryKey val id: String,
     val action: String,
