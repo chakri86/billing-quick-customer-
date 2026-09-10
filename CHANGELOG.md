@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0 — Store Gmail and Google Drive synchronization
+
+- Added first-install store Gmail authorization before application user setup.
+- Added private Google Drive app-data storage for the complete store snapshot.
+- Added automatic new-store detection and Super User initialization.
+- Added same-account restore for additional phones and tablets.
+- Added a single primary billing device and read-only monitoring-device mode.
+- Added manual synchronization and a two-minute foreground refresh for monitors.
+- Added local-first writes, pending-state tracking, account matching, and snapshot format checks.
+- Added Google Cloud OAuth configuration, privacy, and Data Safety documentation.
+
 ## 0.8.1 — Category-filtered product rankings
 
 - Made All the default Top products result size.
