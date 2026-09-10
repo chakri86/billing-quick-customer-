@@ -240,7 +240,7 @@ fun BillingApp(viewModel: BillingViewModel) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         val user = viewModel.currentUser
         when {
-            viewModel.driveUiState.stage in setOf(
+            !viewModel.authReady && viewModel.driveUiState.stage in setOf(
                 DriveSetupStage.REQUIRED,
                 DriveSetupStage.AUTHORIZING,
                 DriveSetupStage.CHECKING_DRIVE,
