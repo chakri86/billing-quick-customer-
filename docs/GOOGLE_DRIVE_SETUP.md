@@ -25,6 +25,14 @@ Copy the SHA1 shown for the `debug` variant into the Android OAuth client. For G
 
 An APK signed by a different key has a different SHA-1 and Google authorization will reject it. For reliable Drive testing, run the locally signed Android Studio debug build whose fingerprint you registered, or install through a Play internal-testing track whose Play App Signing fingerprint is registered.
 
+The stable Quick Customer test/release APK produced by the project owner uses this upload-certificate SHA-1:
+
+```text
+64:3A:20:57:BF:81:60:EB:4A:E9:14:BB:7C:E1:1D:CA:95:A2:89:EA
+```
+
+Register that value with package `com.quickcustomer.billing` when testing the separately supplied signed APK. Do not use the fingerprint for a temporary CI debug APK, because its debug signing key is not stable.
+
 ## 3. First device
 
 1. Install Quick Customer.
