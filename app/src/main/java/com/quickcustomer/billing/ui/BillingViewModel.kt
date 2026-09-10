@@ -165,7 +165,11 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             runCatching { repository.ensureSeeded() }
                 .onFailure { operationError = it.message ?: "Could not initialize local data." }
-            needsOwnerSetup = runCatching { !repository.hasUsers() }.getOrDefault(false)
+            val hasUsers = runCatching { repository.hasUsers() }.getOrDefault(false)
+            needsOwnerSetup = !hasUsers
+            // After the first successful store link, never block existing users from
+            // opening their local data just because Google Drive is temporarily offline.
+            if (hasUsers && driveSyncManager.preferences.isLinked) authReady = true
         }
     }
 
