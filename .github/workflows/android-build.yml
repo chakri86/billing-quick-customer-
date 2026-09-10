@@ -36,8 +36,8 @@ jobs:
       - name: Test and build debug APK
         run: ./gradlew testDebugUnitTest assembleDebug
 
-      - name: Build unsigned Play bundle
-        run: ./gradlew bundleRelease
+      - name: Build unsigned release APK and Play bundle
+        run: ./gradlew assembleRelease bundleRelease
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -51,6 +51,7 @@ jobs:
         with:
           name: quick-customer-v0.9.0-play-bundle
           path: |
+            app/build/outputs/apk/release/*.apk
             app/build/outputs/bundle/release/app-release.aab
             app/schemas/
           if-no-files-found: error
