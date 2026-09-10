@@ -3,6 +3,7 @@
 package com.quickcustomer.billing.ui
 
 import android.Manifest
+import android.app.Activity
 import android.app.ActivityManager
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -143,23 +145,117 @@ import com.quickcustomer.billing.data.UserEntity
 import com.quickcustomer.billing.data.UserRole
 import com.quickcustomer.billing.domain.Money
 import com.quickcustomer.billing.domain.BillingCalculator
+import com.quickcustomer.billing.sync.DeviceMode
+import com.quickcustomer.billing.sync.DriveSetupStage
+import com.quickcustomer.billing.sync.GoogleDriveStoreClient
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.Scope
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 @Composable
 fun BillingApp(viewModel: BillingViewModel) {
     val printerSettings by viewModel.settings.collectAsState()
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val authorizationClient = remember(activity) {
+        activity?.let { Identity.getAuthorizationClient(it) }
+    }
+    val authorizationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        try {
+            val authorizationResult = authorizationClient
+                ?.getAuthorizationResultFromIntent(result.data)
+                ?: error("Google authorization is unavailable on this device.")
+            val token = authorizationResult.accessToken
+                ?: error("Google Drive did not return an access token.")
+            viewModel.connectGoogleDrive(token)
+        } catch (failure: ApiException) {
+            viewModel.onDriveAuthorizationFailed(
+                failure.localizedMessage ?: "Google Drive authorization was cancelled."
+            )
+        } catch (failure: Exception) {
+            viewModel.onDriveAuthorizationFailed(
+                failure.localizedMessage ?: "Google Drive authorization was not completed."
+            )
+        }
+    }
+    val requestDriveAccess: () -> Unit = {
+        val client = authorizationClient
+        if (client == null) {
+            viewModel.onDriveAuthorizationFailed("Google Play services are unavailable on this device.")
+        } else {
+            viewModel.onDriveAuthorizationStarted()
+            val request = AuthorizationRequest.builder()
+                .setRequestedScopes(
+                    listOf(
+                        Scope(GoogleDriveStoreClient.DRIVE_APPDATA_SCOPE),
+                        Scope(GoogleDriveStoreClient.EMAIL_SCOPE),
+                        Scope(GoogleDriveStoreClient.OPENID_SCOPE)
+                    )
+                )
+                .build()
+            client.authorize(request)
+                .addOnSuccessListener { authorizationResult ->
+                    if (authorizationResult.hasResolution()) {
+                        val pendingIntent = authorizationResult.pendingIntent
+                        if (pendingIntent == null) {
+                            viewModel.onDriveAuthorizationFailed("Google Drive permission could not be opened.")
+                        } else {
+                            authorizationLauncher.launch(
+                                IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+                            )
+                        }
+                    } else {
+                        val token = authorizationResult.accessToken
+                        if (token == null) {
+                            viewModel.onDriveAuthorizationFailed("Google Drive did not return an access token.")
+                        } else {
+                            viewModel.connectGoogleDrive(token)
+                        }
+                    }
+                }
+                .addOnFailureListener { failure ->
+                    viewModel.onDriveAuthorizationFailed(
+                        failure.localizedMessage ?: "Google Drive authorization failed."
+                    )
+                }
+        }
+    }
+    var attemptedAutomaticReconnect by remember { mutableStateOf(false) }
+    LaunchedEffect(viewModel.shouldAutoReconnectDrive) {
+        if (viewModel.shouldAutoReconnectDrive && !attemptedAutomaticReconnect &&
+            viewModel.driveUiState.stage == DriveSetupStage.REQUIRED
+        ) {
+            attemptedAutomaticReconnect = true
+            requestDriveAccess()
+        }
+    }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         val user = viewModel.currentUser
         when {
+            viewModel.driveUiState.stage in setOf(
+                DriveSetupStage.REQUIRED,
+                DriveSetupStage.AUTHORIZING,
+                DriveSetupStage.CHECKING_DRIVE,
+                DriveSetupStage.RESTORING,
+                DriveSetupStage.ERROR
+            ) -> DriveSetupScreen(
+                viewModel = viewModel,
+                onConnect = requestDriveAccess
+            )
             !viewModel.authReady -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
             viewModel.needsOwnerSetup -> InitialOwnerSetupScreen(viewModel)
             user == null -> LoginScreen(viewModel)
-            else -> AppShell(viewModel, user)
+            else -> AppShell(viewModel, user, requestDriveAccess)
         }
     }
 
@@ -198,6 +294,68 @@ fun BillingApp(viewModel: BillingViewModel) {
             title = { Text("Printer") },
             text = { Text(message) }
         )
+    }
+}
+
+@Composable
+private fun DriveSetupScreen(
+    viewModel: BillingViewModel,
+    onConnect: () -> Unit
+) {
+    val state = viewModel.driveUiState
+    val busy = state.stage in setOf(
+        DriveSetupStage.AUTHORIZING,
+        DriveSetupStage.CHECKING_DRIVE,
+        DriveSetupStage.RESTORING
+    )
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(24.dp).widthIn(max = 560.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Icon(Icons.Default.Sync, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+                Text("Connect Store Gmail", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "Connect the dedicated Gmail account used only for this store. Quick Customer will check its private Drive data before user setup.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (state.email.isNotBlank()) {
+                    Text(state.email, fontWeight = FontWeight.SemiBold)
+                }
+                if (busy) CircularProgressIndicator()
+                Text(
+                    state.message,
+                    color = if (state.stage == DriveSetupStage.ERROR) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+                Button(
+                    onClick = onConnect,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                ) {
+                    Text(if (state.stage == DriveSetupStage.ERROR) "Try again" else "Connect Gmail and Drive")
+                }
+                TextButton(
+                    onClick = viewModel::continueOnThisDeviceOnly,
+                    enabled = !busy
+                ) {
+                    Text("Continue on this device only")
+                }
+                Text(
+                    "Google manages the account sign-in. Quick Customer never sees or stores the Gmail password.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 
@@ -350,7 +508,13 @@ private fun LoginScreen(viewModel: BillingViewModel) {
 
 private data class SectionItem(val section: AppSection, val icon: ImageVector)
 
-private fun sectionsFor(role: UserRole): List<SectionItem> = buildList {
+private fun sectionsFor(role: UserRole, monitorMode: Boolean): List<SectionItem> = buildList {
+    if (monitorMode) {
+        add(SectionItem(AppSection.SALES, Icons.Default.BarChart))
+        add(SectionItem(AppSection.EXPENSES, Icons.Default.ReceiptLong))
+        add(SectionItem(AppSection.INVENTORY, Icons.Default.Inventory2))
+        return@buildList
+    }
     add(SectionItem(AppSection.BILLING, Icons.Default.PointOfSale))
     add(SectionItem(AppSection.SALES, Icons.Default.BarChart))
     add(SectionItem(AppSection.EXPENSES, Icons.Default.ReceiptLong))
@@ -361,11 +525,21 @@ private fun sectionsFor(role: UserRole): List<SectionItem> = buildList {
 }
 
 @Composable
-private fun AppShell(viewModel: BillingViewModel, user: UserEntity) {
-    val sections = remember(user.role) { sectionsFor(user.role) }
+private fun AppShell(viewModel: BillingViewModel, user: UserEntity, onSyncRequest: () -> Unit) {
+    val sections = remember(user.role, viewModel.isMonitorMode) {
+        sectionsFor(user.role, viewModel.isMonitorMode)
+    }
     val pending by viewModel.pendingSyncCount.collectAsState()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    LaunchedEffect(viewModel.isMonitorMode) {
+        if (viewModel.isMonitorMode) {
+            while (true) {
+                delay(120_000)
+                if (!viewModel.isSyncing) onSyncRequest()
+            }
+        }
+    }
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = drawerState.isOpen,
@@ -425,8 +599,19 @@ private fun AppShell(viewModel: BillingViewModel, user: UserEntity) {
                     },
                     actions = {
                         AssistChip(
-                            onClick = {},
-                            label = { Text(if (pending == 0) "Local data ready" else "$pending pending") },
+                            onClick = onSyncRequest,
+                            label = {
+                                Text(
+                                    when {
+                                        viewModel.isSyncing -> "Syncing…"
+                                        viewModel.driveUiState.stage == DriveSetupStage.LOCAL_ONLY ->
+                                            if (pending == 0) "Device only" else "$pending local"
+                                        viewModel.isMonitorMode -> "Refresh Drive"
+                                        pending == 0 -> "Drive ready"
+                                        else -> "$pending pending"
+                                    }
+                                )
+                            },
                             leadingIcon = { Icon(Icons.Default.Sync, null, Modifier.size(18.dp)) }
                         )
                     },
@@ -1894,7 +2079,7 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Privacy and local data", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "Quick Customer stores shop users, products, bills, expenses, inventory, settings, and QR images on this device. The current version does not send this data to a Quick Customer server.",
+                    "Quick Customer stores shop users, products, bills, expenses, inventory, settings, and QR images on this device. When the owner connects Google Drive, a store snapshot is also saved in that Google account's private application-data folder so linked devices can restore or monitor the shop.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
