@@ -60,7 +60,7 @@ Cloud API synchronization is scheduled after the local billing and printer workf
 3. Choose the folder containing `app` and `settings.gradle.kts`.
 4. Allow Gradle synchronization to finish.
 5. Confirm **SDK Platform 36** and **JDK 17** are selected.
-6. Start a phone/tablet emulator or connect the Samsung SM-P615.
+6. Start a phone/tablet emulator 
 7. Click **Run**.
 
 The first build downloads Android and Kotlin dependencies and can take several minutes.
