@@ -42,6 +42,54 @@ interface UserDao {
 }
 
 @Dao
+interface SyncDao {
+    @Query("SELECT * FROM users ORDER BY id") suspend fun users(): List<UserEntity>
+    @Query("SELECT * FROM products ORDER BY id") suspend fun products(): List<ProductEntity>
+    @Query("SELECT * FROM categories ORDER BY name") suspend fun categories(): List<CategoryEntity>
+    @Query("SELECT * FROM sales ORDER BY createdAt, id") suspend fun sales(): List<SaleEntity>
+    @Query("SELECT * FROM sale_items ORDER BY saleId, id") suspend fun saleItems(): List<SaleItemEntity>
+    @Query("SELECT * FROM shop_settings WHERE id = 1") suspend fun settings(): ShopSettingsEntity?
+    @Query("SELECT * FROM audit_logs ORDER BY createdAt, id") suspend fun auditLogs(): List<AuditLogEntity>
+    @Query("SELECT * FROM expenses ORDER BY occurredAt, id") suspend fun expenses(): List<ExpenseEntity>
+    @Query("SELECT * FROM inventory_items ORDER BY id") suspend fun inventoryItems(): List<InventoryItemEntity>
+    @Query("SELECT * FROM stock_transactions ORDER BY createdAt, id")
+    suspend fun stockTransactions(): List<StockTransactionEntity>
+    @Query("SELECT * FROM recipe_ingredients ORDER BY productId, inventoryItemId")
+    suspend fun recipeIngredients(): List<RecipeIngredientEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertUsers(items: List<UserEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertProducts(items: List<ProductEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertCategories(items: List<CategoryEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertSales(items: List<SaleEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertSaleItems(items: List<SaleItemEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertSettings(item: ShopSettingsEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertAuditLogs(items: List<AuditLogEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertExpenses(items: List<ExpenseEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertInventoryItems(items: List<InventoryItemEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertStockTransactions(items: List<StockTransactionEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertRecipeIngredients(items: List<RecipeIngredientEntity>)
+
+    @Query("UPDATE products SET syncStatus = 'SYNCED' WHERE syncStatus != 'SYNCED'")
+    suspend fun markProductsSynced()
+    @Query("UPDATE categories SET syncStatus = 'SYNCED' WHERE syncStatus != 'SYNCED'")
+    suspend fun markCategoriesSynced()
+    @Query("UPDATE sales SET syncStatus = 'SYNCED' WHERE syncStatus != 'SYNCED'")
+    suspend fun markSalesSynced()
+    @Query("UPDATE audit_logs SET syncStatus = 'SYNCED' WHERE syncStatus != 'SYNCED'")
+    suspend fun markAuditLogsSynced()
+    @Query("UPDATE expenses SET syncStatus = 'SYNCED' WHERE syncStatus != 'SYNCED'")
+    suspend fun markExpensesSynced()
+    @Query("UPDATE inventory_items SET syncStatus = 'SYNCED' WHERE syncStatus != 'SYNCED'")
+    suspend fun markInventoryItemsSynced()
+    @Query("UPDATE stock_transactions SET syncStatus = 'SYNCED' WHERE syncStatus != 'SYNCED'")
+    suspend fun markStockTransactionsSynced()
+    @Query("UPDATE recipe_ingredients SET syncStatus = 'SYNCED' WHERE syncStatus != 'SYNCED'")
+    suspend fun markRecipeIngredientsSynced()
+}
+
+@Dao
 interface ProductDao {
     @Query("SELECT COUNT(*) FROM products") suspend fun count(): Int
     @Query("SELECT * FROM products WHERE isDeleted = 0 ORDER BY category, sortOrder, name")
@@ -289,6 +337,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun auditDao(): AuditDao
     abstract fun expenseDao(): ExpenseDao
     abstract fun inventoryDao(): InventoryDao
+    abstract fun syncDao(): SyncDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null

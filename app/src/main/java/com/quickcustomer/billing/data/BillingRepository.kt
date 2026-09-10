@@ -11,6 +11,7 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 import com.quickcustomer.billing.domain.BillingCalculator
 import kotlinx.coroutines.flow.Flow
+import com.quickcustomer.billing.sync.StoreSnapshot
 
 class BillingRepository(private val db: AppDatabase) {
     val products: Flow<List<ProductEntity>> = db.productDao().observeAll()
@@ -32,6 +33,50 @@ class BillingRepository(private val db: AppDatabase) {
 
     fun productProfitInRange(startInclusive: Long, endExclusive: Long): Flow<List<ProductProfitSummary>> =
         db.saleDao().observeProductProfitInRange(startInclusive, endExclusive)
+
+    suspend fun exportStoreSnapshot(): StoreSnapshot = db.withTransaction {
+        val sync = db.syncDao()
+        StoreSnapshot(
+            users = sync.users(),
+            products = sync.products(),
+            categories = sync.categories(),
+            sales = sync.sales(),
+            saleItems = sync.saleItems(),
+            settings = sync.settings() ?: ShopSettingsEntity(),
+            auditLogs = sync.auditLogs(),
+            expenses = sync.expenses(),
+            inventoryItems = sync.inventoryItems(),
+            stockTransactions = sync.stockTransactions(),
+            recipeIngredients = sync.recipeIngredients()
+        )
+    }
+
+    suspend fun importStoreSnapshot(snapshot: StoreSnapshot) = db.withTransaction {
+        val sync = db.syncDao()
+        sync.upsertUsers(snapshot.users)
+        sync.upsertCategories(snapshot.categories)
+        sync.upsertProducts(snapshot.products)
+        sync.upsertSettings(snapshot.settings)
+        sync.upsertSales(snapshot.sales)
+        sync.upsertSaleItems(snapshot.saleItems)
+        sync.upsertExpenses(snapshot.expenses)
+        sync.upsertInventoryItems(snapshot.inventoryItems)
+        sync.upsertStockTransactions(snapshot.stockTransactions)
+        sync.upsertRecipeIngredients(snapshot.recipeIngredients)
+        sync.upsertAuditLogs(snapshot.auditLogs)
+    }
+
+    suspend fun markStoreSnapshotSynced() = db.withTransaction {
+        val sync = db.syncDao()
+        sync.markProductsSynced()
+        sync.markCategoriesSynced()
+        sync.markSalesSynced()
+        sync.markAuditLogsSynced()
+        sync.markExpensesSynced()
+        sync.markInventoryItemsSynced()
+        sync.markStockTransactionsSynced()
+        sync.markRecipeIngredientsSynced()
+    }
 
     suspend fun ensureSeeded() = db.withTransaction {
         if (db.productDao().count() == 0) {
@@ -135,7 +180,10 @@ class BillingRepository(private val db: AppDatabase) {
         paymentMethod: PaymentMethod,
         requestedDiscountPaise: Long,
         cashReceivedPaise: Long?,
-        settings: ShopSettingsEntity
+        settings: ShopSettingsEntity,
+        businessId: String = "business-demo",
+        shopId: String = "shop-main",
+        deviceId: String = "local-device"
     ): Receipt = db.withTransaction {
         require(lines.isNotEmpty()) { "A bill must contain at least one item." }
         val now = System.currentTimeMillis()
@@ -157,6 +205,9 @@ class BillingRepository(private val db: AppDatabase) {
         val invoiceNumber = buildInvoiceNumber(now)
         val sale = SaleEntity(
             id = saleId,
+            businessId = businessId,
+            shopId = shopId,
+            deviceId = deviceId,
             invoiceNumber = invoiceNumber,
             createdAt = now,
             cashierId = cashier.id,
