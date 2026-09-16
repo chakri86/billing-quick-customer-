@@ -2,7 +2,7 @@
 
 Use this worksheet when completing **Policy and programs → App content → Data safety**. Recheck every answer against the final release and all future SDKs before submitting.
 
-## Current version 0.9.0
+## Current version 0.9.1
 
 - Third-party advertising SDKs: No
 - Analytics SDKs: No
@@ -16,6 +16,9 @@ Use this worksheet when completing **Policy and programs → App content → Dat
 - Optional Bluetooth printer data: Sent directly to the paired printer selected by the device owner
 - Data deletion: Available under **Settings → Privacy and local data → Erase all local data**
 - Privacy-policy access: Available inside Settings and through the public policy URL
+- Optional voice billing: Yes; enabled by the Super User and activated only when the cashier taps the microphone
+- Audio recordings stored by Quick Customer: No
+- Recognized speech text stored by Quick Customer: No; held only long enough to show the confirmation dialog
 
 ## Data categories and purpose
 
@@ -30,6 +33,7 @@ The UPI QR selection currently uses an Android persisted content URI. It may not
 - Bluetooth hardware is marked optional.
 - `INTERNET` and `ACCESS_NETWORK_STATE` support Google account/Drive synchronization and public policy access.
 - Google authorization requests `openid`, account email, and the narrow `drive.appdata` scope.
+- `RECORD_AUDIO` is requested at runtime only when enabled voice billing is used. Android's selected speech-recognition provider may process microphone audio; verify the final Play Console audio-data disclosure against the provider behavior on supported devices.
 
 ## Recheck before every release
 

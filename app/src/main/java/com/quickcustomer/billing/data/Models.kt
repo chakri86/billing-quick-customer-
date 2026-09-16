@@ -246,6 +246,7 @@ data class ShopSettingsEntity(
     @ColumnInfo(defaultValue = "58") val printerPaperWidthMm: Int = 58,
     @ColumnInfo(defaultValue = "0") val printerAutoPrint: Boolean = false,
     @ColumnInfo(defaultValue = "''") val upiQrImageUri: String = "",
+    @ColumnInfo(defaultValue = "0") val voiceRecognitionEnabled: Boolean = false,
     val updatedAt: Long = System.currentTimeMillis()
 )
 

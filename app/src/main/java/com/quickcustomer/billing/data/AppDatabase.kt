@@ -324,7 +324,7 @@ interface InventoryDao {
         StockTransactionEntity::class,
         RecipeIngredientEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 @TypeConverters(DbConverters::class)
@@ -353,7 +353,8 @@ abstract class AppDatabase : RoomDatabase() {
                 MIGRATION_3_4,
                 MIGRATION_4_5,
                 MIGRATION_5_6,
-                MIGRATION_6_7
+                MIGRATION_6_7,
+                MIGRATION_7_8
             )
                 .build()
                 .also { instance = it }
@@ -514,6 +515,14 @@ abstract class AppDatabase : RoomDatabase() {
                         )
                     END
                     """.trimIndent()
+                )
+            }
+        }
+
+        internal val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE shop_settings ADD COLUMN voiceRecognitionEnabled INTEGER NOT NULL DEFAULT 0"
                 )
             }
         }

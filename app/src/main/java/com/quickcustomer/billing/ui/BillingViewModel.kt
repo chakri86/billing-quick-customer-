@@ -30,6 +30,7 @@ import com.quickcustomer.billing.data.UserEntity
 import com.quickcustomer.billing.data.UserRole
 import com.quickcustomer.billing.domain.AccessPolicy
 import com.quickcustomer.billing.domain.AppPermission
+import com.quickcustomer.billing.domain.VoiceCartItem
 import com.quickcustomer.billing.printing.BluetoothPrinterManager
 import com.quickcustomer.billing.printing.PairedBluetoothPrinter
 import com.quickcustomer.billing.printing.PrintableReceipt
@@ -327,6 +328,20 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
 
     fun add(product: ProductEntity) {
         quantities[product.id] = (quantities[product.id] ?: 0) + 1
+    }
+
+    fun addVoiceItems(items: List<VoiceCartItem>) {
+        if (isMonitorMode) {
+            operationError = "This is a read-only monitoring device."
+            return
+        }
+        val activeProductIds = products.value
+            .filter { it.isActive && !it.isDeleted }
+            .mapTo(mutableSetOf()) { it.id }
+        items.filter { it.productId in activeProductIds }.forEach { item ->
+            quantities[item.productId] = ((quantities[item.productId] ?: 0) + item.quantity)
+                .coerceAtMost(99)
+        }
     }
 
     fun decrement(product: ProductEntity) {

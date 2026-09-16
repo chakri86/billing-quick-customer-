@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.9.0
+## Included in version 0.9.1
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -56,8 +56,23 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Existing-store restore when the same store Gmail is connected on another device
 - One primary billing device with additional read-only monitoring devices
 - Manual refresh plus two-minute foreground refresh on monitoring devices
+- Owner-controlled, tap-to-speak voice billing for product names and quantities
+- Review-and-confirm dialog before recognized items are added to the cart
+- No voice control for payments, discounts, cancellations, or administration
 
-Version 0.9.0 adds owner-controlled synchronization through the dedicated store Google account. The primary device continues to save every operation locally first and uploads a store snapshot after changes. Monitoring devices download that snapshot and cannot create or modify business records.
+Version 0.9.1 adds optional voice-assisted item entry while retaining the version 0.9.0 Google Drive synchronization foundation. The primary device continues to save every operation locally first and uploads a store snapshot after changes. Monitoring devices download that snapshot and cannot create or modify business records.
+
+## Configure voice billing
+
+1. Sign in as the Super User.
+2. Open **Settings → Voice billing**.
+3. Enable the switch and save settings.
+4. Return to Billing and tap **Voice billing**.
+5. Allow microphone access when Android asks.
+6. Say an order such as **“two tea two coffee.”**
+7. Review the exact products and quantities, then tap **Add to cart**.
+
+The microphone is hidden while the setting is disabled. Quick Customer does not store recordings; Android's selected speech-recognition service processes the audio. Touch billing remains available on devices without speech recognition.
 
 ## Open in Android Studio
 

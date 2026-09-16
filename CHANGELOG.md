@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.1 — Optional voice-assisted billing
+
+- Added a Super User setting to enable or disable voice billing.
+- Added tap-to-speak product and quantity entry on the Billing screen.
+- Added spoken number support from one through twenty and numeric quantities through 99.
+- Added deterministic category defaults for generic requests such as tea and coffee.
+- Added a mandatory confirmation dialog showing the exact interpreted products and quantities.
+- Kept payments, discounts, cancellations, and administration outside voice control.
+- Added microphone privacy disclosure, runtime permission handling, and speech-service fallback messaging.
+- Added parser unit tests and a Room 7-to-8 migration that preserves existing store data.
+
 ## 0.9.0 — Store Gmail and Google Drive synchronization
 
 - Added first-install store Gmail authorization before application user setup.
