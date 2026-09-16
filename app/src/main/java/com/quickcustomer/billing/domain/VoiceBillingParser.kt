@@ -176,7 +176,7 @@ object VoiceBillingParser {
     private fun isQuantityToken(token: String): Boolean =
         token.all(Char::isDigit) || token in numberWords
 
-    private fun quantityOf(token: String): Int? =
+    internal fun quantityOf(token: String): Int? =
         token.toIntOrNull()?.takeIf { it in 1..99 } ?: numberWords[token]
 
     private fun normalize(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFC)

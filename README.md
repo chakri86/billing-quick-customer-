@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.9.2
+## Included in version 0.9.3
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -60,7 +60,7 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Review-and-confirm dialog before recognized items are added to the cart
 - No voice control for payments, discounts, cancellations, or administration
 
-Version 0.9.2 adds optional voice-assisted item entry while retaining the version 0.9.0 Google Drive synchronization foundation. The primary device continues to save every operation locally first and uploads a store snapshot after changes. Monitoring devices download that snapshot and cannot create or modify business records.
+Version 0.9.3 adds optional voice-assisted item entry while retaining the version 0.9.0 Google Drive synchronization foundation. The primary device continues to save every operation locally first and uploads a store snapshot after changes. Monitoring devices download that snapshot and cannot create or modify business records.
 
 ## Configure voice billing
 
@@ -154,7 +154,7 @@ For a signed bundle, create `keystore.properties` from `keystore.properties.exam
 - Whether menu prices already include applicable taxes
 - Final spelling for Sonti/Sonthi and Sukku wording
 
-## Multilingual voice billing (0.9.2)
+## Multilingual voice billing (0.9.3)
 
 Enable Voice billing in Settings. Select English, Telugu or Hindi on that device; this does not change the shop or phone language. Say the quantity before each product and review the exact matched items. Examples: `two tea two coffee`, `rendu tea oka coffee`, `రెండు టీ ఒక కాఫీ`, `do chai ek coffee`, `दो चाय एक कॉफी`, `two tea రెండు కాఫీ`.
 
@@ -165,3 +165,11 @@ Automatic language switching is an optional Android 14+ request, off by default;
 Device validation: test each example with the corresponding language; test mixed mode if offered; verify the heard text and exact quantities; cancel and confirm separately; restart and verify the language preference; disable voice and verify the microphone disappears. Test in actual shop noise.
 
 Android API reference: https://developer.android.com/reference/android/speech/RecognizerIntent#EXTRA_ENABLE_LANGUAGE_SWITCH
+
+## Voice entry for products (0.9.3)
+
+Enable Settings → Voice input (previously Voice billing). In Products → Add or Edit product, use the microphone beside Product name, Category, or Price. Dictate one field at a time; choose Use value after reviewing the recognized text, then explicitly Save the completed form. Existing product-management permissions still apply. No product is saved by speech alone. Names retain the recognized language; exact existing category names are reused case-insensitively.
+
+Prices use the existing whole-rupee form. Native digits and common English/Telugu/Hindi number words are accepted; unclear prices, decimals, negative amounts and overflow are rejected. Type unsupported number phrases manually. The same per-device language and optional automatic-switching preferences apply.
+
+Device tests: create a product by dictating all three fields; cancel a proposed value and check the old field is retained; test price “twenty”, “ఇరవై”, “बीस” and “20”; check Save creates exactly one product; edit a product and confirm no changes are stored until Save; deny microphone permission; disable voice and verify microphones disappear; confirm employees without product-management permission cannot access product editing.

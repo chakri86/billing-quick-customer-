@@ -31,7 +31,7 @@ Android system services may process device backup data according to the device o
 - **Nearby devices/Bluetooth:** Used only when the owner enables and connects a paired Bluetooth receipt printer.
 - **Internet and network state:** Used for owner-authorized Google account and Drive synchronization and for opening the public privacy policy.
 - **Google Drive application data:** Used only after the owner authorizes the dedicated store account. The app requests the narrow `drive.appdata` scope rather than general access to Drive files.
-- **Microphone:** Used only after the Super User enables voice billing and a cashier taps the microphone button. Android's selected speech-recognition service may process the audio under that provider's terms. Quick Customer uses the returned text to prepare a product-and-quantity confirmation and does not store audio recordings.
+- **Microphone:** Used only after the Super User enables voice billing and an authorized user taps a microphone button. Android's selected speech-recognition service may process the audio under that provider's terms. Quick Customer uses the returned text to prepare a billing confirmation or a product-form field preview and does not store audio recordings.
 
 The app can be used without Bluetooth printing or voice billing. Denying Bluetooth or microphone permission does not prevent touch billing.
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.3 — Voice entry for product forms
+
+- Added field microphones for product name, category and whole-rupee price in Add/Edit product.
+- Added a Use value review step; Save remains an explicit action.
+- Reused per-device English/Telugu/Hindi speech preferences and the owner-controlled voice switch.
+- Added strict spoken-price parsing and rejection tests for ambiguous/invalid prices.
+- Preserved product-management permissions and existing database format.
+
 ## 0.9.2 — English, Telugu, and Hindi voice input
 
 - Preserve Telugu/Hindi characters and normalize native digits.

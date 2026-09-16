@@ -116,6 +116,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -151,6 +152,7 @@ import com.quickcustomer.billing.domain.Money
 import com.quickcustomer.billing.domain.BillingCalculator
 import com.quickcustomer.billing.domain.VoiceBillingParseResult
 import com.quickcustomer.billing.domain.VoiceBillingParser
+import com.quickcustomer.billing.domain.VoiceProductInput
 import com.quickcustomer.billing.sync.DeviceMode
 import com.quickcustomer.billing.sync.DriveSetupStage
 import com.quickcustomer.billing.sync.GoogleDriveStoreClient
@@ -681,32 +683,7 @@ private fun BillingScreen(viewModel: BillingViewModel) {
         }
     }
     fun launchVoiceRecognition() {
-        val voicePrefs = context.getSharedPreferences("voice_input", Context.MODE_PRIVATE)
-        val language = voicePrefs.getString("language", "en-IN") ?: "en-IN"
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
-            if (Build.VERSION.SDK_INT >= 34 && voicePrefs.getBoolean("mixed", false)) {
-                putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH, RecognizerIntent.LANGUAGE_SWITCH_BALANCED)
-                putStringArrayListExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES,
-                    arrayListOf("en-IN", "te-IN", "hi-IN")
-                )
-            }
-            if (Build.VERSION.SDK_INT >= 33) {
-                putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS,
-                    ArrayList(active.filter { !it.isDeleted }.map { it.name }.take(100)))
-            }
-            putExtra(
-                RecognizerIntent.EXTRA_PROMPT,
-                when (language) {
-                    "te-IN" -> "రెండు టీ ఒక కాఫీ / rendu tea oka coffee"
-                    "hi-IN" -> "दो चाय एक कॉफी / do chai ek coffee"
-                    else -> "Two tea, two coffee / rendu tea, do coffee"
-                }
-            )
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-        }
+        val intent = createVoiceInputIntent(context, null, active.filter { !it.isDeleted }.map { it.name })
         try {
             voiceRecognitionLauncher.launch(intent)
         } catch (_: ActivityNotFoundException) {
@@ -814,6 +791,29 @@ private fun BillingScreen(viewModel: BillingViewModel) {
                 TextButton(onClick = { voiceMessage = null }) { Text("OK") }
             }
         )
+    }
+}
+
+private fun createVoiceInputIntent(context: Context, prompt: String?, bias: List<String> = emptyList()): Intent {
+    val preferences = context.getSharedPreferences("voice_input", Context.MODE_PRIVATE)
+    val language = preferences.getString("language", "en-IN") ?: "en-IN"
+    return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+        if (Build.VERSION.SDK_INT >= 34 && preferences.getBoolean("mixed", false)) {
+            putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH, RecognizerIntent.LANGUAGE_SWITCH_BALANCED)
+            putStringArrayListExtra(RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES,
+                arrayListOf("en-IN", "te-IN", "hi-IN"))
+        }
+        if (Build.VERSION.SDK_INT >= 33 && bias.isNotEmpty()) {
+            putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(bias.take(100)))
+        }
+        putExtra(RecognizerIntent.EXTRA_PROMPT, prompt ?: when (language) {
+            "te-IN" -> "రెండు టీ ఒక కాఫీ / rendu tea oka coffee"
+            "hi-IN" -> "दो चाय एक कॉफी / do chai ek coffee"
+            else -> "Two tea, two coffee / rendu tea, do coffee"
+        })
+        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
     }
 }
 
@@ -1801,6 +1801,7 @@ private fun CancelSaleDialog(sale: SaleEntity, onDismiss: () -> Unit, onConfirm:
 private fun ProductsScreen(viewModel: BillingViewModel) {
     val products by viewModel.products.collectAsState()
     val categories by viewModel.categories.collectAsState()
+    val settings by viewModel.settings.collectAsState()
     var editing by remember { mutableStateOf<ProductEntity?>(null) }
     var creating by remember { mutableStateOf(false) }
     var organizingCategories by remember { mutableStateOf(false) }
@@ -1851,6 +1852,8 @@ private fun ProductsScreen(viewModel: BillingViewModel) {
     }
     if (creating) ProductDialog(
         product = null,
+        voiceEnabled = settings.voiceRecognitionEnabled,
+        categoryNames = categories.map { it.name },
         onDismiss = { creating = false },
         onDelete = null,
         onSave = { name, category, price ->
@@ -1860,6 +1863,8 @@ private fun ProductsScreen(viewModel: BillingViewModel) {
     editing?.let { product ->
         ProductDialog(
             product = product,
+            voiceEnabled = settings.voiceRecognitionEnabled,
+            categoryNames = categories.map { it.name },
             onDismiss = { editing = null },
             onDelete = {
                 pendingDelete = product
@@ -1899,25 +1904,78 @@ private fun ProductsScreen(viewModel: BillingViewModel) {
 @Composable
 private fun ProductDialog(
     product: ProductEntity?,
+    voiceEnabled: Boolean,
+    categoryNames: List<String>,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
     onSave: (String, String, Long) -> Unit
 ) {
-    var name by remember(product) { mutableStateOf(product?.name.orEmpty()) }
-    var category by remember(product) { mutableStateOf(product?.category.orEmpty()) }
-    var price by remember(product) { mutableStateOf(product?.pricePaise?.div(100)?.toString().orEmpty()) }
-    val valid = name.isNotBlank() && category.isNotBlank() && (price.toLongOrNull() ?: 0) > 0
+    var name by rememberSaveable(product?.id) { mutableStateOf(product?.name.orEmpty()) }
+    var category by rememberSaveable(product?.id) { mutableStateOf(product?.category.orEmpty()) }
+    var price by rememberSaveable(product?.id) { mutableStateOf(product?.pricePaise?.div(100)?.toString().orEmpty()) }
+    val context = LocalContext.current
+    var voiceField by rememberSaveable { mutableStateOf<String?>(null) }
+    var heard by rememberSaveable { mutableStateOf<String?>(null) }
+    var proposed by rememberSaveable { mutableStateOf<String?>(null) }
+    var voiceError by rememberSaveable { mutableStateOf<String?>(null) }
+    val recognition = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (voiceEnabled && result.resultCode == Activity.RESULT_OK && voiceField != null) {
+            val text = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
+            if (!text.isNullOrBlank()) {
+                heard = text
+                proposed = when (voiceField) {
+                    "Price" -> VoiceProductInput.priceRupees(text)?.toString()
+                    "Category" -> categoryNames.firstOrNull { it.equals(text, ignoreCase = true) } ?: text
+                    else -> text
+                }
+                voiceError = if (proposed == null) "Price was unclear. Say a whole rupee amount, such as twenty or 20, or type it manually." else null
+            } else voiceError = "No speech was heard. Please try again."
+        }
+    }
+    fun launchFieldVoice() {
+        if (!voiceEnabled) return
+        val prompt = when (voiceField) {
+            "Price" -> "Say the price in whole rupees / ధర / कीमत"
+            "Category" -> "Say the category / వర్గం / श्रेणी"
+            else -> "Say the product name / ఉత్పత్తి పేరు / उत्पाद का नाम"
+        }
+        try { recognition.launch(createVoiceInputIntent(context, prompt, if (voiceField == "Category") categoryNames else emptyList())) }
+        catch (_: ActivityNotFoundException) { voiceError = "Speech recognition is unavailable. You can type the product details." }
+        catch (_: SecurityException) { voiceError = "Microphone access is unavailable. You can type the product details." }
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) launchFieldVoice() else voiceError = "Microphone permission was denied. You can still type the product details."
+    }
+    fun dictate(field: String) {
+        if (!voiceEnabled) return
+        voiceField = field
+        heard = null
+        proposed = null
+        voiceError = null
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) launchFieldVoice()
+        else permission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+    val valid = name.isNotBlank() && category.isNotBlank() &&
+        (price.toLongOrNull()?.let { it > 0 && it <= Long.MAX_VALUE / 100 } == true)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (product == null) "Add product" else "Edit product") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Product name") }, singleLine = true)
-                OutlinedTextField(category, { category = it }, label = { Text("Category") }, singleLine = true)
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (voiceEnabled) {
+                    Text("Tap a field's microphone, review the value, then Save the product.", style = MaterialTheme.typography.bodySmall)
+                    VoiceInputOptions()
+                }
+                OutlinedTextField(name, { name = it }, label = { Text("Product name") }, singleLine = true,
+                    trailingIcon = { if (voiceEnabled) IconButton(onClick = { dictate("Product name") }) { Icon(Icons.Default.Mic, "Dictate product name") } })
+                OutlinedTextField(category, { category = it }, label = { Text("Category") }, singleLine = true,
+                    trailingIcon = { if (voiceEnabled) IconButton(onClick = { dictate("Category") }) { Icon(Icons.Default.Mic, "Dictate category") } })
                 OutlinedTextField(
                     price, { price = it.filter(Char::isDigit) }, label = { Text("Price in ₹") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    trailingIcon = { if (voiceEnabled) IconButton(onClick = { dictate("Price") }) { Icon(Icons.Default.Mic, "Dictate price") } }
                 )
+                voiceError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (product != null) Text("Changing the price affects future bills only.", style = MaterialTheme.typography.bodySmall)
             }
         },
@@ -1933,6 +1991,30 @@ private fun ProductDialog(
             }
         }
     )
+    if (voiceEnabled && proposed != null && heard != null) {
+        AlertDialog(
+            onDismissRequest = { proposed = null; heard = null },
+            title = { Text("Review spoken ${voiceField?.lowercase()}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Heard: “$heard”")
+                    Text(if (voiceField == "Price") "Price: ₹$proposed" else "${voiceField}: $proposed", fontWeight = FontWeight.Bold)
+                    Text("This fills the form only. Review all fields and tap Save when ready.")
+                }
+            },
+            confirmButton = { TextButton(onClick = {
+                proposed?.let { value -> when (voiceField) {
+                    "Product name" -> name = value
+                    "Category" -> category = value
+                    "Price" -> price = value
+                    else -> Unit
+                } }
+                proposed = null; heard = null
+            }) { Text("Use value") } },
+            dismissButton = { TextButton(onClick = { proposed = null; heard = null }) { Text("Cancel") } }
+        )
+    }
+
 }
 
 @Composable
@@ -2172,8 +2254,8 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
         OutlinedCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingToggle(
-                    "Voice billing",
-                    "Show a microphone on the Billing screen. Spoken items are always reviewed before they enter the cart.",
+                    "Voice input",
+                    "Show microphones in Billing and Add/Edit product. Review spoken values before applying them.",
                     voiceRecognitionEnabled
                 ) { voiceRecognitionEnabled = it }
                 if (voiceRecognitionEnabled) VoiceInputOptions()
