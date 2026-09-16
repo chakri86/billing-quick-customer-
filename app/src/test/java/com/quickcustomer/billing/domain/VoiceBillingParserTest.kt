@@ -84,7 +84,7 @@ class VoiceBillingParserTest {
 
     @Test
     fun invalidAndOverflowQuantitiesAreNeverClampedIntoOrders() {
-        listOf("0 tea", "100 tea", "-2 tea", "1.5 tea", "౦ టీ", "१०० चाय", "99 tea two tea").forEach {
+        listOf("0 tea", "100 tea", "-2 tea", "1.5 tea", "౦ టీ", "१०० चाय", "99 tea two tea", "twenty one tea", "two three coffee").forEach {
             assertTrue(it, VoiceBillingParser.parse(it, products).items.isEmpty())
         }
     }

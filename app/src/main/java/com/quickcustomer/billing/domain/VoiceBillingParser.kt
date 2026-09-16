@@ -121,6 +121,10 @@ object VoiceBillingParser {
                 index++
             }
             if (productWords.isEmpty()) {
+                if (index < tokens.size) {
+                    return VoiceBillingParseResult(transcript.trim(), emptyList(),
+                        listOf("Consecutive quantities are unclear. Say one quantity before each product; use digits for quantities above twenty."))
+                }
                 notes += "No product was heard after quantity $quantity."
             } else {
                 segments += quantity to productWords.joinToString(" ")
