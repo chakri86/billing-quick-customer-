@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.9.3
+## Included in version 0.9.4
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -156,7 +156,7 @@ For a signed bundle, create `keystore.properties` from `keystore.properties.exam
 
 ## Multilingual voice billing (0.9.3)
 
-Enable Voice billing in Settings. Select English, Telugu or Hindi on that device; this does not change the shop or phone language. Say the quantity before each product and review the exact matched items. Examples: `two tea two coffee`, `rendu tea oka coffee`, `రెండు టీ ఒక కాఫీ`, `do chai ek coffee`, `दो चाय एक कॉफी`, `two tea రెండు కాఫీ`.
+Enable Voice billing in Settings. Select English, Telugu or Hindi on that device; this does not change the shop or phone language. Say a product alone for one, or place its quantity before or after the name; review the exact matched items. Examples: `two tea two coffee`, `rendu tea oka coffee`, `రెండు టీ ఒక కాఫీ`, `do chai ek coffee`, `दो चाय एक कॉफी`, `two tea రెండు కాఫీ`.
 
 The parser supports common quantity words 1–20 in these languages and numeric digits 1–99, including Telugu and Hindi digits. Common cafe aliases are built in; arbitrary translations of every custom product are not provided. Use the catalog name for other products. Generic tea/coffee still shows the first active category product for confirmation.
 
@@ -173,3 +173,11 @@ Enable Settings → Voice input (previously Voice billing). In Products → Add 
 Prices use the existing whole-rupee form. Native digits and common English/Telugu/Hindi number words are accepted; unclear prices, decimals, negative amounts and overflow are rejected. Type unsupported number phrases manually. The same per-device language and optional automatic-switching preferences apply.
 
 Device tests: create a product by dictating all three fields; cancel a proposed value and check the old field is retained; test price “twenty”, “ఇరవై”, “बीस” and “20”; check Save creates exactly one product; edit a product and confirm no changes are stored until Save; deny microphone permission; disable voice and verify microphones disappear; confirm employees without product-management permission cannot access product editing.
+
+## Flexible voice orders (0.9.4)
+
+`coffee` means one coffee; `two tea` and `tea two` both mean two teas. The same rule applies to supported Telugu/Hindi quantities, native digits and product names. Multiple products can be spoken together. Separate ambiguous phrases with “and”: `tea two and coffee one` is explicit, whereas `tea two coffee` could attach “two” to either product and asks you to retry. All words must be accounted for; unknown words prevent adding a partial order.
+
+Targeted recognition corrections map `brew` to `BRU` and `dumpty` to `Dum Tea` when those active products match. Existing exact catalog names take precedence. Ambiguous partial names are rejected; generic category defaults such as tea/coffee retain their existing first-active-product behavior and always show the actual product for review. No arbitrary fuzzy substitution, product renaming, or changes to product-form dictation are performed.
+
+Device validation: say coffee; two tea; tea two; tea two coffee three; two tea and coffee; brew tea; two brew tea; dumpty; dumpty two. Confirm the actual product and quantity shown. Also try an unknown product and an ambiguous partial name; neither should silently add items.

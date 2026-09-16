@@ -100,4 +100,92 @@ class VoiceBillingParserTest {
         val chair = ProductEntity("chair", "Other", "Chair", 1000, 0)
         assertEquals("chair", VoiceBillingParser.parse("one chair", listOf(chair)).items.single().productId)
     }
+
+    @Test
+    fun productAloneDefaultsToOne() {
+        listOf("coffee", "కాఫీ", "कॉफी", "please add coffee").forEach {
+            assertEquals(it, listOf(VoiceCartItem("bru-coffee", "BRU Coffee", 1)), VoiceBillingParser.parse(it, products).items)
+        }
+    }
+
+    @Test
+    fun quantitiesCanBeBeforeOrAfterTheNameInAllSupportedLanguages() {
+        listOf("two tea", "tea two", "tea 2", "రెండు టీ", "టీ రెండు", "టీ ౨", "दो चाय", "चाय दो", "tea rendu", "చాయ్ २").forEach {
+            assertEquals(it, listOf(VoiceCartItem("dum-tea", "Dum Tea", 2)), VoiceBillingParser.parse(it, products).items)
+        }
+    }
+
+    @Test
+    fun multipleItemsCanMixDefaultPrefixAndSuffixQuantities() {
+        listOf("two tea and coffee", "tea two and coffee", "two tea coffee", "tea two coffee one", "tea two, coffee").forEach {
+            assertEquals(it, listOf(VoiceCartItem("dum-tea", "Dum Tea", 2), VoiceCartItem("bru-coffee", "BRU Coffee", 1)),
+                VoiceBillingParser.parse(it, products).items)
+        }
+        assertEquals(listOf(VoiceCartItem("dum-tea", "Dum Tea", 2), VoiceCartItem("bru-coffee", "BRU Coffee", 3)),
+            VoiceBillingParser.parse("tea two coffee three", products).items)
+        assertEquals(2, VoiceBillingParser.parse("coffee coffee", products).items.single().quantity)
+    }
+
+    @Test
+    fun ambiguousQuantityAttachmentIsRejected() {
+        val result = VoiceBillingParser.parse("tea two coffee", products)
+        assertTrue(result.items.isEmpty())
+        assertTrue(result.notes.any { it.contains("More than one") })
+        listOf("two tea three", "tea zero", "tea 0", "tea 100", "tea -2", "tea 1.5").forEach {
+            assertTrue(it, VoiceBillingParser.parse(it, products).items.isEmpty())
+        }
+    }
+
+    @Test
+    fun reportedBrewAndDumptyTranscriptionsMatchActualProducts() {
+        val menu = products + ProductEntity("bru-tea", "Teas", "BRU Tea", 1500, 2)
+        listOf("brew tea", "two brew tea", "brew tea two").forEach {
+            val result = VoiceBillingParser.parse(it, menu)
+            assertEquals("bru-tea", result.items.single().productId)
+            assertEquals(if (it == "brew tea") 1 else 2, result.items.single().quantity)
+            assertTrue(result.notes.any { note -> note.contains("BRU Tea") })
+        }
+        listOf("dumpty", "two dumpty", "dumpty two").forEach {
+            val result = VoiceBillingParser.parse(it, menu)
+            assertEquals("dum-tea", result.items.single().productId)
+            assertEquals(if (it == "dumpty") 1 else 2, result.items.single().quantity)
+        }
+    }
+
+    @Test
+    fun correctionsRequireTheirTargetAndNeverCreateProducts() {
+        assertTrue(VoiceBillingParser.parse("brew tea", products).items.isEmpty())
+        assertTrue(VoiceBillingParser.parse("dumpty", products.filter { it.id != "dum-tea" }).items.isEmpty())
+        assertTrue(VoiceBillingParser.parse("dumpty", products.map { it.copy(isActive = false) }).items.isEmpty())
+    }
+
+    @Test
+    fun realCatalogNamesTakePrecedenceOverCorrections() {
+        val menu = products + listOf(
+            ProductEntity("bru-tea", "Teas", "BRU Tea", 1500, 2),
+            ProductEntity("brew-tea", "Teas", "Brew Tea", 2500, 3),
+            ProductEntity("dumpty-snack", "Snacks", "Dumpty", 3000, 4)
+        )
+        assertEquals("brew-tea", VoiceBillingParser.parse("brew tea", menu).items.single().productId)
+        assertEquals("dumpty-snack", VoiceBillingParser.parse("dumpty", menu).items.single().productId)
+        assertTrue(VoiceBillingParser.parse("bru", menu).items.isEmpty())
+    }
+
+    @Test
+    fun unknownWordsCannotBeDroppedToMakeAPartialOrder() {
+        listOf("coffee and pizza", "coffee pizza", "two unknown tea", "remove coffee", "brew unknown tea").forEach {
+            assertTrue(it, VoiceBillingParser.parse(it, products).items.isEmpty())
+        }
+    }
+
+    @Test
+    fun longerCatalogNamesStayOneItem() {
+        assertEquals(listOf(VoiceCartItem("black-coffee", "Black Coffee", 2)), VoiceBillingParser.parse("black coffee two", products).items)
+        assertEquals(listOf(VoiceCartItem("corn-samosa", "Corn Samosa", 1)), VoiceBillingParser.parse("corn samosa", products).items)
+    }
+
+    @Test
+    fun longUtterancesAreBounded() {
+        assertTrue(VoiceBillingParser.parse(List(65) { "coffee" }.joinToString(" "), products).items.isEmpty())
+    }
 }

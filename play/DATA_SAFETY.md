@@ -2,7 +2,7 @@
 
 Use this worksheet when completing **Policy and programs → App content → Data safety**. Recheck every answer against the final release and all future SDKs before submitting.
 
-## Current version 0.9.3
+## Current version 0.9.4
 
 - Third-party advertising SDKs: No
 - Analytics SDKs: No

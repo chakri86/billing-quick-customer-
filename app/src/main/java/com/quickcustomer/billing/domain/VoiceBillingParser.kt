@@ -82,6 +82,7 @@ object VoiceBillingParser {
     // Whole-token aliases preserve modifiers (e.g. ginger tea vs plain tea).
     private val productAliases = mapOf(
         "chai" to "tea", "chaay" to "tea", "teas" to "tea",
+        "brew" to "bru", "dumpty" to "dum tea",
         "టీ" to "tea", "టీలు" to "tea", "చాయ్" to "tea", "చాయ" to "tea", "चाय" to "tea", "टी" to "tea",
         "coffees" to "coffee", "కాఫీ" to "coffee", "కాఫీలు" to "coffee", "कॉफी" to "coffee", "कॉफ़ी" to "coffee", "काफी" to "coffee",
         "samosas" to "samosa", "సమోసా" to "samosa", "సమోసాలు" to "samosa", "समोसा" to "samosa", "समोसे" to "samosa",
@@ -92,81 +93,103 @@ object VoiceBillingParser {
         "బ్లాక్" to "black", "ब्लैक" to "black", "కార్న్" to "corn", "कॉर्न" to "corn"
     )
 
+    private data class HeardItem(val product: ProductEntity, val quantity: Int, val spoken: String)
+    private data class NameMatch(val end: Int, val products: List<ProductEntity>, val spoken: String)
+
     fun parse(transcript: String, products: List<ProductEntity>): VoiceBillingParseResult {
         val activeProducts = products.filter { it.isActive && !it.isDeleted }
-            .sortedWith(compareBy<ProductEntity> { it.sortOrder }.thenBy { it.name })
-        val tokens = normalize(transcript).split(' ').filter(String::isNotBlank)
+            .sortedWith(compareBy<ProductEntity> { it.sortOrder }.thenBy { it.name }.thenBy { it.id })
+        fun rejected(message: String) = VoiceBillingParseResult(transcript.trim(), emptyList(), listOf(message))
+        val allTokens = normalize(transcript).split(' ').filter(String::isNotBlank)
+        if (allTokens.size > 64) return rejected("Please split this into shorter orders.")
         if (Regex("[-−]\\s*\\p{Nd}|\\p{Nd}[.,]\\p{Nd}").containsMatchIn(transcript) ||
-            tokens.any { it.all(Char::isDigit) && quantityOf(it) == null }) {
-            return VoiceBillingParseResult(transcript.trim(), emptyList(), listOf("Use whole quantities from 1 to 99."))
+            allTokens.any { it.all(Char::isDigit) && quantityOf(it) == null }) {
+            return rejected("Use whole quantities from 1 to 99.")
         }
-        val segments = mutableListOf<Pair<Int, String>>()
-        val notes = mutableListOf<String>()
-        var index = 0
-
-        while (index < tokens.size) {
-            while (index < tokens.size && tokens[index] in fillerWords) index++
-            if (index >= tokens.size) break
-
-            val quantity = quantityOf(tokens[index])
-            if (quantity == null) {
-                notes += "Could not understand '${tokens[index]}'. Say a quantity before each product."
-                index++
-                continue
-            }
-            index++
-            val productWords = mutableListOf<String>()
-            while (index < tokens.size && !isQuantityToken(tokens[index])) {
-                if (tokens[index] !in fillerWords) productWords += tokens[index]
-                index++
-            }
-            if (productWords.isEmpty()) {
-                if (index < tokens.size) {
-                    return VoiceBillingParseResult(transcript.trim(), emptyList(),
-                        listOf("Consecutive quantities are unclear. Say one quantity before each product; use digits for quantities above twenty."))
-                }
-                notes += "No product was heard after quantity $quantity."
-            } else {
-                segments += quantity to productWords.joinToString(" ")
-            }
+        // Explicit conjunctions keep quantities attached to their own clause.
+        val clauses = transcript.split(Regex("[,;\\n]+|\\s+(?:and|aur|और|మరియు|inka|ఇంకా|mariyu)\\s+", RegexOption.IGNORE_CASE))
+            .map { clause -> normalize(clause).split(' ').filter { it.isNotBlank() && it !in fillerWords } }
+            .filter { it.isNotEmpty() }
+        if (clauses.isEmpty()) return rejected("No products were recognized.")
+        val parsed = mutableListOf<HeardItem>()
+        for (tokens in clauses) {
+            val possibilities = parseClause(tokens, activeProducts)
+            if (possibilities.isEmpty()) return rejected(
+                "No active product matched the complete phrase '${tokens.joinToString(" ")}', or its quantity was unclear. Try 'coffee', 'two tea' or 'tea two'."
+            )
+            if (possibilities.size > 1) return rejected(
+                "More than one product or quantity interpretation is possible. Use the full product name and separate items with 'and', for example 'tea two and coffee one'."
+            )
+            parsed += possibilities.single()
         }
-
         val matched = linkedMapOf<String, VoiceCartItem>()
-        segments.forEach { (quantity, spokenName) ->
-            val match = findProduct(spokenName, activeProducts)
-            if (match == null) {
-                notes += "No active product matched '$spokenName'."
-            } else {
-                val previous = matched[match.id]
-                val total = (previous?.quantity ?: 0) + quantity
-                if (total > 99) {
-                    return VoiceBillingParseResult(transcript.trim(), emptyList(), listOf("Quantity exceeds 99. Please split the order."))
-                }
-                matched[match.id] = VoiceCartItem(
-                    productId = match.id,
-                    productName = match.name,
-                    quantity = total
-                )
-                if (normalize(match.name) != spokenName) {
-                    notes += "'$spokenName' matched ${match.name}."
-                }
-            }
+        val notes = mutableListOf<String>()
+        parsed.forEach { heard ->
+            val product = heard.product
+            val total = (matched[product.id]?.quantity ?: 0) + heard.quantity
+            if (total > 99) return rejected("Quantity exceeds 99. Please split the order.")
+            matched[product.id] = VoiceCartItem(product.id, product.name, total)
+            if (normalize(product.name) != heard.spoken) notes += "'${heard.spoken}' matched ${product.name}."
         }
-
-        if (segments.isEmpty() && notes.isEmpty()) notes += "No products were recognized."
         return VoiceBillingParseResult(transcript.trim(), matched.values.toList(), notes.distinct())
     }
 
-    private fun findProduct(spokenName: String, products: List<ProductEntity>): ProductEntity? {
-        // Exact catalog names take precedence over translations and category defaults.
-        products.firstOrNull { normalize(it.name) == spokenName }?.let { return it }
+    private fun parseClause(tokens: List<String>, products: List<ProductEntity>): List<List<HeardItem>> {
+        val memo = mutableMapOf<Int, List<List<HeardItem>>>()
+        val names = mutableMapOf<Int, NameMatch?>()
+        fun nameAt(start: Int): NameMatch? = names.getOrPut(start) {
+            // Longest matching name prevents 'black coffee' becoming two generic items.
+            var end = start
+            while (end < tokens.size && !isQuantityToken(tokens[end])) end++
+            (end downTo start + 1).firstNotNullOfOrNull { stop ->
+                val spoken = tokens.subList(start, stop).joinToString(" ")
+                val matches = findProducts(spoken, products, allowPartial = stop == end)
+                if (matches.isEmpty()) null else NameMatch(stop, matches, spoken)
+            }
+        }
+        fun signature(items: List<HeardItem>): Map<String, Int> =
+            items.groupBy { it.product.id }.mapValues { (_, entries) -> entries.sumOf { it.quantity } }
+        fun walk(start: Int): List<List<HeardItem>> {
+            if (start == tokens.size) return listOf(emptyList())
+            memo[start]?.let { return it }
+            val prefix = quantityOf(tokens[start])
+            val name = nameAt(if (prefix == null) start else start + 1)
+                ?: return emptyList<List<HeardItem>>().also { memo[start] = it }
+            val quantities = mutableListOf((prefix ?: 1) to name.end)
+            if (prefix == null && name.end < tokens.size) {
+                quantityOf(tokens[name.end])?.let { quantities += it to name.end + 1 }
+            }
+            val results = mutableListOf<List<HeardItem>>()
+            for ((quantity, next) in quantities) {
+                for (product in name.products) {
+                    for (tail in walk(next)) {
+                        val candidate = listOf(HeardItem(product, quantity, name.spoken)) + tail
+                        if (results.none { signature(it) == signature(candidate) }) results += candidate
+                        // Two distinct carts are sufficient to establish ambiguity.
+                        if (results.size == 2) return results.also { memo[start] = it }
+                    }
+                }
+            }
+            return results.also { memo[start] = it }
+        }
+        return walk(0)
+    }
+
+    private fun findProducts(spokenName: String, products: List<ProductEntity>, allowPartial: Boolean): List<ProductEntity> {
+        // A real catalog name wins over a phonetic correction, e.g. an actual Brew Tea.
+        products.filter { normalize(it.name) == spokenName }.takeIf { it.isNotEmpty() }?.let { return it }
         val spoken = canonicalName(spokenName)
-        if (spoken.isBlank()) return null
-        products.firstOrNull { canonicalName(it.name) == spoken }?.let { return it }
-        products.firstOrNull { canonicalName(it.category).removeSuffix("s") == spoken }?.let { return it }
-        products.firstOrNull { canonicalName(it.name).startsWith("$spoken ") }?.let { return it }
-        return products.firstOrNull { product ->
-            canonicalName(product.name).split(' ').containsAll(spoken.split(' '))
+        if (spoken.isBlank()) return emptyList()
+        products.filter { canonicalName(it.name) == spoken }.takeIf { it.isNotEmpty() }?.let { return it }
+        if (spokenName.split(' ').any { it == "brew" || it == "dumpty" }) return emptyList()
+        // Preserve established generic category defaults; the review names the exact product.
+        products.firstOrNull { canonicalName(it.category).removeSuffix("s") == spoken }?.let { return listOf(it) }
+        if (!allowPartial) return emptyList()
+        products.filter { canonicalName(it.name).startsWith("$spoken ") }.takeIf { it.isNotEmpty() }?.let { return it }
+        val requestedCounts = spoken.split(' ').groupingBy { it }.eachCount()
+        return products.filter { product ->
+            val availableCounts = canonicalName(product.name).split(' ').groupingBy { it }.eachCount()
+            requestedCounts.all { (word, count) -> (availableCounts[word] ?: 0) >= count }
         }
     }
 

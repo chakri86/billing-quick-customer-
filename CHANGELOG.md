@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.4 — Flexible voice quantities and targeted name corrections
+
+- Default product-only orders to one, and accept quantities before or after product names.
+- Parse multiple items with explicit ambiguity checks and require the whole phrase to match.
+- Correct the reported brew/BRU and dumpty/Dum Tea transcriptions against active catalog names.
+- Keep exact names ahead of aliases and reject ambiguous partial product matches.
+- Update voice examples and extend regression tests. No database or speech-language configuration changes.
+
 ## 0.9.3 — Voice entry for product forms
 
 - Added field microphones for product name, category and whole-rupee price in Add/Edit product.

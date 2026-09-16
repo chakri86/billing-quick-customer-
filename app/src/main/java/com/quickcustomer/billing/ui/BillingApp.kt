@@ -721,7 +721,7 @@ private fun BillingScreen(viewModel: BillingViewModel) {
                         Text("Voice billing")
                     }
                     Text(
-                        "Say the quantity before each product.",
+                        "Say coffee, two tea, or tea two.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -809,9 +809,9 @@ private fun createVoiceInputIntent(context: Context, prompt: String?, bias: List
             putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(bias.take(100)))
         }
         putExtra(RecognizerIntent.EXTRA_PROMPT, prompt ?: when (language) {
-            "te-IN" -> "రెండు టీ ఒక కాఫీ / rendu tea oka coffee"
-            "hi-IN" -> "दो चाय एक कॉफी / do chai ek coffee"
-            else -> "Two tea, two coffee / rendu tea, do coffee"
+            "te-IN" -> "కాఫీ / రెండు టీ / టీ రెండు"
+            "hi-IN" -> "कॉफी / दो चाय / चाय दो"
+            else -> "Coffee / two tea / tea two"
         })
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
     }
