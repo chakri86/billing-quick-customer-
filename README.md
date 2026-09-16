@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.9.1
+## Included in version 0.9.2
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -60,7 +60,7 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Review-and-confirm dialog before recognized items are added to the cart
 - No voice control for payments, discounts, cancellations, or administration
 
-Version 0.9.1 adds optional voice-assisted item entry while retaining the version 0.9.0 Google Drive synchronization foundation. The primary device continues to save every operation locally first and uploads a store snapshot after changes. Monitoring devices download that snapshot and cannot create or modify business records.
+Version 0.9.2 adds optional voice-assisted item entry while retaining the version 0.9.0 Google Drive synchronization foundation. The primary device continues to save every operation locally first and uploads a store snapshot after changes. Monitoring devices download that snapshot and cannot create or modify business records.
 
 ## Configure voice billing
 
@@ -153,3 +153,15 @@ For a signed bundle, create `keystore.properties` from `keystore.properties.exam
 - Confirmation that `Samosa (2 pcs) ₹15` means two pieces for ₹15
 - Whether menu prices already include applicable taxes
 - Final spelling for Sonti/Sonthi and Sukku wording
+
+## Multilingual voice billing (0.9.2)
+
+Enable Voice billing in Settings. Select English, Telugu or Hindi on that device; this does not change the shop or phone language. Say the quantity before each product and review the exact matched items. Examples: `two tea two coffee`, `rendu tea oka coffee`, `రెండు టీ ఒక కాఫీ`, `do chai ek coffee`, `दो चाय एक कॉफी`, `two tea రెండు కాఫీ`.
+
+The parser supports common quantity words 1–20 in these languages and numeric digits 1–99, including Telugu and Hindi digits. Common cafe aliases are built in; arbitrary translations of every custom product are not provided. Use the catalog name for other products. Generic tea/coffee still shows the first active category product for confirmation.
+
+Automatic language switching is an optional Android 14+ request, off by default; it depends on the installed recognition service and downloaded English/Telugu/Hindi models. Older devices and unsupported services should use a selected primary language. Mixed speech accuracy needs physical-device testing. Quick Customer does not record audio.
+
+Device validation: test each example with the corresponding language; test mixed mode if offered; verify the heard text and exact quantities; cancel and confirm separately; restart and verify the language preference; disable voice and verify the microphone disappears. Test in actual shop noise.
+
+Android API reference: https://developer.android.com/reference/android/speech/RecognizerIntent#EXTRA_ENABLE_LANGUAGE_SWITCH

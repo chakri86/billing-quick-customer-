@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.2 — English, Telugu, and Hindi voice input
+
+- Preserve Telugu/Hindi characters and normalize native digits.
+- Parse English, Telugu, Hindi and mixed quantity-first orders, including common transliterated quantities and tea/coffee/snack aliases.
+- Add a device-local speech-language selector in Settings and Billing.
+- Offer optional Android 14+ automatic switching; recognizer support and downloaded models are required.
+- Reject invalid quantities instead of silently truncating them.
+- Keep confirmation mandatory; no Room migration or Drive format changes.
+
 ## 0.9.1 — Optional voice-assisted billing
 
 - Added a Super User setting to enable or disable voice billing.

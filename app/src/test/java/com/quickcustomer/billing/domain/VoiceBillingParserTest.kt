@@ -43,4 +43,61 @@ class VoiceBillingParserTest {
         assertTrue(result.items.isEmpty())
         assertTrue(result.notes.any { it.contains("No active product matched") })
     }
+
+    @Test
+    fun teluguHindiAndMixedOrdersMatchTheSameCart() {
+        val samples = listOf(
+            "two tea one coffee", "rendu tea oka coffee", "రెండు టీ ఒక కాఫీ",
+            "do chai ek coffee", "दो चाय एक कॉफी", "two టీ ek कॉफी",
+            "రెండు tea और one coffee", "౨ టీ ౧ కాఫీ", "२ चाय १ कॉफी",
+            "రెండు టీలు ఒక కాఫీ ఇవ్వండి", "दो चाय और एक कॉफी दीजिए",
+            "two teas and one coffee please"
+        )
+        samples.forEach { sentence ->
+            val result = VoiceBillingParser.parse(sentence, products)
+            assertEquals(sentence, listOf(
+                VoiceCartItem("dum-tea", "Dum Tea", 2),
+                VoiceCartItem("bru-coffee", "BRU Coffee", 1)
+            ), result.items)
+        }
+    }
+
+    @Test
+    fun translatedModifiersPreserveTheSpecificProduct() {
+        listOf("రెండు అల్లం టీ", "दो अदरक चाय", "rendu allam tea", "do adrak chai").forEach {
+            assertEquals(listOf(VoiceCartItem("ginger-tea", "Ginger Tea", 2)), VoiceBillingParser.parse(it, products).items)
+        }
+    }
+
+    @Test
+    fun nativeCustomProductNamesArePreserved() {
+        val native = ProductEntity("native", "Snacks", "మిర్చి బజ్జి", 1000, 0)
+        assertEquals(listOf(VoiceCartItem("native", "మిర్చి బజ్జి", 3)),
+            VoiceBillingParser.parse("మూడు మిర్చి బజ్జి", products + native).items)
+    }
+
+    @Test
+    fun unknownNativeWordsAreNotDroppedToProduceFalseMatches() {
+        assertTrue(VoiceBillingParser.parse("two తెలియని tea", products).items.isEmpty())
+        assertTrue(VoiceBillingParser.parse("दो अज्ञात चाय", products).items.isEmpty())
+    }
+
+    @Test
+    fun invalidAndOverflowQuantitiesAreNeverClampedIntoOrders() {
+        listOf("0 tea", "100 tea", "-2 tea", "1.5 tea", "౦ టీ", "१०० चाय", "99 tea two tea").forEach {
+            assertTrue(it, VoiceBillingParser.parse(it, products).items.isEmpty())
+        }
+    }
+
+    @Test
+    fun inactiveAndDeletedProductsAreExcluded() {
+        val unavailable = listOf(products[0].copy(isActive = false), products[1].copy(isDeleted = true))
+        assertTrue(VoiceBillingParser.parse("రెండు టీ", unavailable).items.isEmpty())
+    }
+
+    @Test
+    fun aliasesDoNotRewritePartsOfCustomNames() {
+        val chair = ProductEntity("chair", "Other", "Chair", 1000, 0)
+        assertEquals("chair", VoiceBillingParser.parse("one chair", listOf(chair)).items.single().productId)
+    }
 }

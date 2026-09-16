@@ -7,6 +7,7 @@ import android.app.Activity
 import android.app.ActivityManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -675,15 +676,34 @@ private fun BillingScreen(viewModel: BillingViewModel) {
             } else {
                 pendingVoiceResult = VoiceBillingParser.parse(transcript, active)
             }
+        } else {
+            voiceMessage = "No speech result. Try again, choose your main spoken language, or turn off automatic switching if language models are unavailable."
         }
     }
     fun launchVoiceRecognition() {
+        val voicePrefs = context.getSharedPreferences("voice_input", Context.MODE_PRIVATE)
+        val language = voicePrefs.getString("language", "en-IN") ?: "en-IN"
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+            if (Build.VERSION.SDK_INT >= 34 && voicePrefs.getBoolean("mixed", false)) {
+                putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH, RecognizerIntent.LANGUAGE_SWITCH_BALANCED)
+                putStringArrayListExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES,
+                    arrayListOf("en-IN", "te-IN", "hi-IN")
+                )
+            }
+            if (Build.VERSION.SDK_INT >= 33) {
+                putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS,
+                    ArrayList(active.filter { !it.isDeleted }.map { it.name }.take(100)))
+            }
             putExtra(
                 RecognizerIntent.EXTRA_PROMPT,
-                "Say products and quantities, for example: two tea two coffee"
+                when (language) {
+                    "te-IN" -> "రెండు టీ ఒక కాఫీ / rendu tea oka coffee"
+                    "hi-IN" -> "दो चाय एक कॉफी / do chai ek coffee"
+                    else -> "Two tea, two coffee / rendu tea, do coffee"
+                }
             )
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
@@ -712,8 +732,9 @@ private fun BillingScreen(viewModel: BillingViewModel) {
     Column(Modifier.fillMaxSize()) {
         if (settings.voiceRecognitionEnabled) {
             Surface(tonalElevation = 2.dp) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -723,10 +744,12 @@ private fun BillingScreen(viewModel: BillingViewModel) {
                         Text("Voice billing")
                     }
                     Text(
-                        "Say: two tea two coffee",
+                        "Say the quantity before each product.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                VoiceInputOptions()
                 }
             }
         }
@@ -791,6 +814,44 @@ private fun BillingScreen(viewModel: BillingViewModel) {
                 TextButton(onClick = { voiceMessage = null }) { Text("OK") }
             }
         )
+    }
+}
+
+@Composable
+private fun VoiceInputOptions() {
+    val context = LocalContext.current
+    val preferences = remember(context) { context.getSharedPreferences("voice_input", Context.MODE_PRIVATE) }
+    var language by remember { mutableStateOf(preferences.getString("language", "en-IN") ?: "en-IN") }
+    var mixed by remember { mutableStateOf(preferences.getBoolean("mixed", false)) }
+    var expanded by remember { mutableStateOf(false) }
+    val languages = listOf("en-IN" to "English", "te-IN" to "తెలుగు (Telugu)", "hi-IN" to "हिन्दी (Hindi)")
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box {
+            TextButton(onClick = { expanded = true }) {
+                Text("Speech language: ${languages.firstOrNull { it.first == language }?.second ?: "English"} ▾")
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                languages.forEach { (tag, label) ->
+                    DropdownMenuItem(text = { Text(label) }, onClick = {
+                        language = tag
+                        preferences.edit().putString("language", tag).apply()
+                        expanded = false
+                    })
+                }
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 34) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = mixed, onCheckedChange = {
+                    mixed = it
+                    preferences.edit().putBoolean("mixed", it).apply()
+                })
+                Text("Try automatic English / Telugu / Hindi switching", style = MaterialTheme.typography.bodySmall)
+            }
+            if (mixed) Text("Requires support and downloaded language models in your speech service. If recognition fails, turn this off and choose your main language.", style = MaterialTheme.typography.bodySmall)
+        } else {
+            Text("For mixed orders, select the language you speak most. Automatic switching is unavailable on this Android version.", style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 
@@ -2115,6 +2176,7 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
                     "Show a microphone on the Billing screen. Spoken items are always reviewed before they enter the cart.",
                     voiceRecognitionEnabled
                 ) { voiceRecognitionEnabled = it }
+                if (voiceRecognitionEnabled) VoiceInputOptions()
                 Text(
                     "When used, Android's selected speech service processes microphone audio. Quick Customer keeps only the recognized text temporarily and does not store recordings.",
                     style = MaterialTheme.typography.bodySmall,
