@@ -131,6 +131,7 @@ object VoiceBillingParser {
         parsed.forEach { heard ->
             if (heard.products.size > 1 || heard.suggested) {
                 choices += VoiceProductChoice(heard.spoken, heard.quantity, heard.products)
+                if (heard.suggested) notes += "No exact match for '${heard.spoken}'. Select a suggestion only if it is correct."
                 return@forEach
             }
             val product = heard.products.single()
@@ -190,12 +191,12 @@ object VoiceBillingParser {
             }
             val results = mutableListOf<List<HeardItem>>()
             for ((quantity, next) in quantities) {
-                    for (tail in walk(next)) {
-                        val candidate = listOf(HeardItem(name.products, quantity, name.spoken, name.suggested)) + tail
-                        if (results.none { signature(it) == signature(candidate) }) results += candidate
-                        // Two distinct carts are sufficient to establish ambiguity.
-                        if (results.size == 2) return results.also { memo[start] = it }
-                    }
+                for (tail in walk(next)) {
+                    val candidate = listOf(HeardItem(name.products, quantity, name.spoken, name.suggested)) + tail
+                    if (results.none { signature(it) == signature(candidate) }) results += candidate
+                    // Product choices stay grouped; two distinct quantity interpretations are unsafe.
+                    if (results.size == 2) return results.also { memo[start] = it }
+                }
             }
             return results.also { memo[start] = it }
         }
