@@ -3,14 +3,19 @@
 package com.quickcustomer.billing.ui
 
 import android.Manifest
+import android.app.Activity
 import android.app.ActivityManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings as AndroidSettings
+import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -59,6 +64,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.ReceiptLong
@@ -110,6 +116,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -143,23 +150,116 @@ import com.quickcustomer.billing.data.UserEntity
 import com.quickcustomer.billing.data.UserRole
 import com.quickcustomer.billing.domain.Money
 import com.quickcustomer.billing.domain.BillingCalculator
+import com.quickcustomer.billing.domain.VoiceBillingParseResult
+import com.quickcustomer.billing.domain.VoiceBillingParser
+import com.quickcustomer.billing.domain.VoiceProductInput
+import com.quickcustomer.billing.sync.DeviceMode
+import com.quickcustomer.billing.sync.DriveSetupStage
+import com.quickcustomer.billing.sync.GoogleDriveStoreClient
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.Scope
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 @Composable
 fun BillingApp(viewModel: BillingViewModel) {
     val printerSettings by viewModel.settings.collectAsState()
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val authorizationClient = remember(activity) {
+        activity?.let { Identity.getAuthorizationClient(it) }
+    }
+    val authorizationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        try {
+            val authorizationResult = authorizationClient
+                ?.getAuthorizationResultFromIntent(result.data)
+                ?: error("Google authorization is unavailable on this device.")
+            val token = authorizationResult.accessToken
+                ?: error("Google Drive did not return an access token.")
+            viewModel.connectGoogleDrive(token)
+        } catch (failure: ApiException) {
+            viewModel.onDriveAuthorizationFailed(driveAuthorizationFailureMessage(failure))
+        } catch (failure: Exception) {
+            viewModel.onDriveAuthorizationFailed(
+                failure.localizedMessage ?: "Google Drive authorization was not completed."
+            )
+        }
+    }
+    val requestDriveAccess: () -> Unit = {
+        val client = authorizationClient
+        if (client == null) {
+            viewModel.onDriveAuthorizationFailed("Google Play services are unavailable on this device.")
+        } else {
+            viewModel.onDriveAuthorizationStarted()
+            val request = AuthorizationRequest.builder()
+                .setRequestedScopes(
+                    listOf(
+                        Scope(GoogleDriveStoreClient.DRIVE_APPDATA_SCOPE),
+                        Scope(GoogleDriveStoreClient.EMAIL_SCOPE),
+                        Scope(GoogleDriveStoreClient.OPENID_SCOPE)
+                    )
+                )
+                .build()
+            client.authorize(request)
+                .addOnSuccessListener { authorizationResult ->
+                    if (authorizationResult.hasResolution()) {
+                        val pendingIntent = authorizationResult.pendingIntent
+                        if (pendingIntent == null) {
+                            viewModel.onDriveAuthorizationFailed("Google Drive permission could not be opened.")
+                        } else {
+                            authorizationLauncher.launch(
+                                IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+                            )
+                        }
+                    } else {
+                        val token = authorizationResult.accessToken
+                        if (token == null) {
+                            viewModel.onDriveAuthorizationFailed("Google Drive did not return an access token.")
+                        } else {
+                            viewModel.connectGoogleDrive(token)
+                        }
+                    }
+                }
+                .addOnFailureListener { failure ->
+                    viewModel.onDriveAuthorizationFailed(driveAuthorizationFailureMessage(failure))
+                }
+        }
+    }
+    var attemptedAutomaticReconnect by remember { mutableStateOf(false) }
+    LaunchedEffect(viewModel.shouldAutoReconnectDrive) {
+        if (viewModel.shouldAutoReconnectDrive && !attemptedAutomaticReconnect &&
+            viewModel.driveUiState.stage == DriveSetupStage.REQUIRED
+        ) {
+            attemptedAutomaticReconnect = true
+            requestDriveAccess()
+        }
+    }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         val user = viewModel.currentUser
         when {
+            !viewModel.authReady && viewModel.driveUiState.stage in setOf(
+                DriveSetupStage.REQUIRED,
+                DriveSetupStage.AUTHORIZING,
+                DriveSetupStage.CHECKING_DRIVE,
+                DriveSetupStage.RESTORING,
+                DriveSetupStage.ERROR
+            ) -> DriveSetupScreen(
+                viewModel = viewModel,
+                onConnect = requestDriveAccess
+            )
             !viewModel.authReady -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
             viewModel.needsOwnerSetup -> InitialOwnerSetupScreen(viewModel)
             user == null -> LoginScreen(viewModel)
-            else -> AppShell(viewModel, user)
+            else -> AppShell(viewModel, user, requestDriveAccess)
         }
     }
 
@@ -198,6 +298,78 @@ fun BillingApp(viewModel: BillingViewModel) {
             title = { Text("Printer") },
             text = { Text(message) }
         )
+    }
+}
+
+private fun driveAuthorizationFailureMessage(failure: Exception): String {
+    val raw = failure.localizedMessage.orEmpty()
+    return when {
+        raw.contains("UNREGISTERED_ON_API_CONSOLE", ignoreCase = true) ->
+            "Google authorization is not configured for this APK. Register com.quickcustomer.billing and this APK's SHA-1 in Google Cloud, then try again."
+        raw.isBlank() -> "Google Drive authorization was not completed."
+        else -> raw
+    }
+}
+
+@Composable
+private fun DriveSetupScreen(
+    viewModel: BillingViewModel,
+    onConnect: () -> Unit
+) {
+    val state = viewModel.driveUiState
+    val busy = state.stage in setOf(
+        DriveSetupStage.AUTHORIZING,
+        DriveSetupStage.CHECKING_DRIVE,
+        DriveSetupStage.RESTORING
+    )
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(24.dp).widthIn(max = 560.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Icon(Icons.Default.Sync, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+                Text("Connect Store Gmail", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "Connect the dedicated Gmail account used only for this store. Quick Customer will check its private Drive data before user setup.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (state.email.isNotBlank()) {
+                    Text(state.email, fontWeight = FontWeight.SemiBold)
+                }
+                if (busy) CircularProgressIndicator()
+                Text(
+                    state.message,
+                    color = if (state.stage == DriveSetupStage.ERROR) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+                Button(
+                    onClick = onConnect,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                ) {
+                    Text(if (state.stage == DriveSetupStage.ERROR) "Try again" else "Connect Gmail and Drive")
+                }
+                TextButton(
+                    onClick = viewModel::continueOnThisDeviceOnly,
+                    enabled = !busy
+                ) {
+                    Text("Continue on this device only")
+                }
+                Text(
+                    "Google manages the account sign-in. Quick Customer never sees or stores the Gmail password.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 
@@ -350,7 +522,13 @@ private fun LoginScreen(viewModel: BillingViewModel) {
 
 private data class SectionItem(val section: AppSection, val icon: ImageVector)
 
-private fun sectionsFor(role: UserRole): List<SectionItem> = buildList {
+private fun sectionsFor(role: UserRole, monitorMode: Boolean): List<SectionItem> = buildList {
+    if (monitorMode) {
+        add(SectionItem(AppSection.SALES, Icons.Default.BarChart))
+        add(SectionItem(AppSection.EXPENSES, Icons.Default.ReceiptLong))
+        add(SectionItem(AppSection.INVENTORY, Icons.Default.Inventory2))
+        return@buildList
+    }
     add(SectionItem(AppSection.BILLING, Icons.Default.PointOfSale))
     add(SectionItem(AppSection.SALES, Icons.Default.BarChart))
     add(SectionItem(AppSection.EXPENSES, Icons.Default.ReceiptLong))
@@ -361,11 +539,21 @@ private fun sectionsFor(role: UserRole): List<SectionItem> = buildList {
 }
 
 @Composable
-private fun AppShell(viewModel: BillingViewModel, user: UserEntity) {
-    val sections = remember(user.role) { sectionsFor(user.role) }
+private fun AppShell(viewModel: BillingViewModel, user: UserEntity, onSyncRequest: () -> Unit) {
+    val sections = remember(user.role, viewModel.isMonitorMode) {
+        sectionsFor(user.role, viewModel.isMonitorMode)
+    }
     val pending by viewModel.pendingSyncCount.collectAsState()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    LaunchedEffect(viewModel.isMonitorMode) {
+        if (viewModel.isMonitorMode) {
+            while (true) {
+                delay(120_000)
+                if (!viewModel.isSyncing) onSyncRequest()
+            }
+        }
+    }
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = drawerState.isOpen,
@@ -425,8 +613,19 @@ private fun AppShell(viewModel: BillingViewModel, user: UserEntity) {
                     },
                     actions = {
                         AssistChip(
-                            onClick = {},
-                            label = { Text(if (pending == 0) "Local data ready" else "$pending pending") },
+                            onClick = onSyncRequest,
+                            label = {
+                                Text(
+                                    when {
+                                        viewModel.isSyncing -> "Syncing…"
+                                        viewModel.driveUiState.stage == DriveSetupStage.LOCAL_ONLY ->
+                                            if (pending == 0) "Device only" else "$pending local"
+                                        viewModel.isMonitorMode -> "Refresh Drive"
+                                        pending == 0 -> "Drive ready"
+                                        else -> "$pending pending"
+                                    }
+                                )
+                            },
                             leadingIcon = { Icon(Icons.Default.Sync, null, Modifier.size(18.dp)) }
                         )
                     },
@@ -453,6 +652,8 @@ private fun AppShell(viewModel: BillingViewModel, user: UserEntity) {
 private fun BillingScreen(viewModel: BillingViewModel) {
     val allProducts by viewModel.products.collectAsState()
     val allCategories by viewModel.categories.collectAsState()
+    val settings by viewModel.settings.collectAsState()
+    val context = LocalContext.current
     val active = allProducts.filter { it.isActive }
     val activeCategoryNames = active.mapTo(mutableSetOf()) { it.category }
     val categories = allCategories.map { it.name }.filter {
@@ -463,35 +664,94 @@ private fun BillingScreen(viewModel: BillingViewModel) {
     }
     val visible = active.filter { it.category == viewModel.selectedCategory }
     var cartSheet by remember { mutableStateOf(false) }
+    var pendingVoiceResult by remember { mutableStateOf<VoiceBillingParseResult?>(null) }
+    var voiceMessage by remember { mutableStateOf<String?>(null) }
+    val voiceRecognitionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val transcript = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+            if (transcript.isNullOrBlank()) {
+                voiceMessage = "No speech was recognized. Please try again."
+            } else {
+                pendingVoiceResult = VoiceBillingParser.parse(transcript, active)
+            }
+        } else {
+            voiceMessage = "No speech result. Try again, choose your main spoken language, or turn off automatic switching if language models are unavailable."
+        }
+    }
+    fun launchVoiceRecognition() {
+        val intent = createVoiceInputIntent(context, null, active.filter { !it.isDeleted }.map { it.name })
+        try {
+            voiceRecognitionLauncher.launch(intent)
+        } catch (_: ActivityNotFoundException) {
+            voiceMessage = "Speech recognition is not available on this device. You can continue using touch billing."
+        }
+    }
+    val microphonePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) launchVoiceRecognition()
+        else voiceMessage = "Microphone permission is required only when using voice billing."
+    }
+    fun startVoiceBilling() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            launchVoiceRecognition()
+        } else {
+            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        when {
-            maxWidth >= 840.dp -> Row(Modifier.fillMaxSize()) {
-                CategoryColumn(categories, viewModel.selectedCategory, viewModel::selectCategory, Modifier.width(160.dp))
-                Divider(Modifier.fillMaxHeight().width(1.dp))
-                CatalogPanel(viewModel.selectedCategory, visible, viewModel, Modifier.weight(1f))
-                Divider(Modifier.fillMaxHeight().width(1.dp))
-                CartPane(viewModel, Modifier.width(340.dp))
-            }
-            maxWidth >= 600.dp -> Row(Modifier.fillMaxSize()) {
-                Column(Modifier.weight(1f)) {
-                    CategoryStrip(categories, viewModel.selectedCategory, viewModel::selectCategory)
-                    CatalogPanel(viewModel.selectedCategory, visible, viewModel, Modifier.weight(1f))
+    Column(Modifier.fillMaxSize()) {
+        if (settings.voiceRecognitionEnabled) {
+            Surface(tonalElevation = 2.dp) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    FilledTonalButton(onClick = ::startVoiceBilling) {
+                        Icon(Icons.Default.Mic, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Voice billing")
+                    }
+                    VoiceInputOptions(compact = true, modifier = Modifier.weight(1f))
                 }
-                Divider(Modifier.fillMaxHeight().width(1.dp))
-                CartPane(viewModel, Modifier.width(330.dp))
             }
-            else -> Box(Modifier.fillMaxSize()) {
-                Column(Modifier.fillMaxSize()) {
-                    CategoryStrip(categories, viewModel.selectedCategory, viewModel::selectCategory)
+        }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                maxWidth >= 840.dp -> Row(Modifier.fillMaxSize()) {
+                    CategoryColumn(categories, viewModel.selectedCategory, viewModel::selectCategory, Modifier.width(160.dp))
+                    Divider(Modifier.fillMaxHeight().width(1.dp))
                     CatalogPanel(viewModel.selectedCategory, visible, viewModel, Modifier.weight(1f))
+                    Divider(Modifier.fillMaxHeight().width(1.dp))
+                    CartPane(viewModel, Modifier.width(340.dp))
                 }
-                ExtendedFloatingActionButton(
-                    onClick = { cartSheet = true },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(18.dp),
-                    icon = { Icon(Icons.Default.ShoppingCart, null) },
-                    text = { Text("Cart (${viewModel.cartCount()})") }
-                )
+                maxWidth >= 600.dp -> Row(Modifier.fillMaxSize()) {
+                    Column(Modifier.weight(1f)) {
+                        CategoryStrip(categories, viewModel.selectedCategory, viewModel::selectCategory)
+                        CatalogPanel(viewModel.selectedCategory, visible, viewModel, Modifier.weight(1f))
+                    }
+                    Divider(Modifier.fillMaxHeight().width(1.dp))
+                    CartPane(viewModel, Modifier.width(330.dp))
+                }
+                else -> Box(Modifier.fillMaxSize()) {
+                    Column(Modifier.fillMaxSize()) {
+                        CategoryStrip(categories, viewModel.selectedCategory, viewModel::selectCategory)
+                        CatalogPanel(viewModel.selectedCategory, visible, viewModel, Modifier.weight(1f))
+                    }
+                    ExtendedFloatingActionButton(
+                        onClick = { cartSheet = true },
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(18.dp),
+                        icon = { Icon(Icons.Default.ShoppingCart, null) },
+                        text = { Text("Cart (${viewModel.cartCount()})") }
+                    )
+                }
             }
         }
     }
@@ -501,6 +761,195 @@ private fun BillingScreen(viewModel: BillingViewModel) {
             CartPane(viewModel, Modifier.fillMaxWidth().heightIn(min = 360.dp, max = 620.dp))
         }
     }
+    pendingVoiceResult?.let { result ->
+        VoiceBillingConfirmationDialog(
+            result = result,
+            selectedCategory = viewModel.selectedCategory,
+            onDismiss = { pendingVoiceResult = null },
+            onConfirm = { items ->
+                viewModel.addVoiceItems(items)
+                pendingVoiceResult = null
+            },
+            onTryAgain = {
+                pendingVoiceResult = null
+                startVoiceBilling()
+            }
+        )
+    }
+    voiceMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { voiceMessage = null },
+            title = { Text("Voice billing") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { voiceMessage = null }) { Text("OK") }
+            }
+        )
+    }
+}
+
+private fun createVoiceInputIntent(context: Context, prompt: String?, bias: List<String> = emptyList()): Intent {
+    val preferences = context.getSharedPreferences("voice_input", Context.MODE_PRIVATE)
+    val language = preferences.getString("language", "en-IN") ?: "en-IN"
+    return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+        if (Build.VERSION.SDK_INT >= 34 && preferences.getBoolean("mixed", false)) {
+            putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH, RecognizerIntent.LANGUAGE_SWITCH_BALANCED)
+            putStringArrayListExtra(RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES,
+                arrayListOf("en-IN", "te-IN", "hi-IN"))
+        }
+        if (Build.VERSION.SDK_INT >= 33 && bias.isNotEmpty()) {
+            putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(bias.take(100)))
+        }
+        putExtra(RecognizerIntent.EXTRA_PROMPT, prompt ?: when (language) {
+            "te-IN" -> "కాఫీ / రెండు టీ / టీ రెండు"
+            "hi-IN" -> "कॉफी / दो चाय / चाय दो"
+            else -> "Coffee / two tea / tea two"
+        })
+        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+    }
+}
+
+@Composable
+private fun VoiceInputOptions(compact: Boolean = false, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val preferences = remember(context) { context.getSharedPreferences("voice_input", Context.MODE_PRIVATE) }
+    var language by remember { mutableStateOf(preferences.getString("language", "en-IN") ?: "en-IN") }
+    var mixed by remember { mutableStateOf(preferences.getBoolean("mixed", false)) }
+    var expanded by remember { mutableStateOf(false) }
+    var showOptions by remember { mutableStateOf(false) }
+    val languages = listOf("en-IN" to "English", "te-IN" to "తెలుగు (Telugu)", "hi-IN" to "हिन्दी (Hindi)")
+    val supportsSwitching = Build.VERSION.SDK_INT >= 34
+    val languageSelector: @Composable (Modifier, Boolean) -> Unit = { selectorModifier, short ->
+        Box(selectorModifier) {
+            TextButton(onClick = { expanded = true }) {
+                val label = if (short) when (language) {
+                    "te-IN" -> "తెలుగు"
+                    "hi-IN" -> "हिन्दी"
+                    else -> "English"
+                } else languages.firstOrNull { it.first == language }?.second ?: "English"
+                Text("${if (short) "" else "Speech language: "}$label${if (short && mixed && supportsSwitching) " · Auto" else ""} ▾",
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                languages.forEach { (tag, label) ->
+                    DropdownMenuItem(text = { Text(label) }, onClick = {
+                        language = tag
+                        preferences.edit().putString("language", tag).apply()
+                        expanded = false
+                    })
+                }
+            }
+        }
+    }
+    val switchingOptions: @Composable () -> Unit = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = mixed && supportsSwitching, enabled = supportsSwitching, onCheckedChange = {
+                    mixed = it
+                    preferences.edit().putBoolean("mixed", it).apply()
+                })
+                Text("Try automatic English / Telugu / Hindi switching", style = MaterialTheme.typography.bodySmall)
+            }
+            Text(if (supportsSwitching) {
+                "Automatic switching needs a compatible speech service and downloaded English, Telugu and Hindi models. If it fails, turn it off and choose your main language."
+            } else {
+                "Automatic switching requires Android 14 or newer. This device uses Android ${Build.VERSION.RELEASE}. Choose English, Telugu or Hindi manually."
+            }, style = MaterialTheme.typography.bodySmall)
+    }
+    if (compact) {
+        Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+            languageSelector(Modifier.weight(1f), true)
+            IconButton(onClick = { showOptions = true }) {
+                Icon(Icons.Default.Settings, contentDescription = "Voice options")
+            }
+        }
+        if (showOptions) AlertDialog(
+            onDismissRequest = { showOptions = false },
+            title = { Text("Voice options") },
+            text = {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Say coffee, two tea, or tea two. Check the items before adding them.")
+                    switchingOptions()
+                }
+            },
+            confirmButton = { TextButton(onClick = { showOptions = false }) { Text("Done") } }
+        )
+    } else {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            languageSelector(Modifier, false)
+            switchingOptions()
+        }
+    }
+}
+
+@Composable
+private fun VoiceBillingConfirmationDialog(
+    result: VoiceBillingParseResult,
+    selectedCategory: String?,
+    onDismiss: () -> Unit,
+    onConfirm: (List<com.quickcustomer.billing.domain.VoiceCartItem>) -> Unit,
+    onTryAgain: () -> Unit
+) {
+    var selections by remember(result) { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    val resolved = VoiceBillingParser.resolve(result, selections)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Confirm voice items") },
+        text = {
+            Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Heard: “${result.transcript}”", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (result.items.isEmpty() && result.choices.isEmpty()) {
+                    Text("No products are ready to add.", color = MaterialTheme.colorScheme.error)
+                } else {
+                    result.items.forEach { item ->
+                        Row(Modifier.fillMaxWidth()) {
+                            Text(item.productName, Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                            Text("× ${item.quantity}", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                result.choices.forEachIndexed { index, choice ->
+                    Text("Choose for ‘${choice.spoken}’ · Quantity: ${choice.quantity}", fontWeight = FontWeight.Medium)
+                    choice.products.sortedBy { if (it.category == selectedCategory) 0 else 1 }.forEach { product ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { selections = selections + (index to product.id) }.padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = selections[index] == product.id,
+                                onClick = { selections = selections + (index to product.id) })
+                            Column(Modifier.weight(1f)) {
+                                Text(product.name, fontWeight = FontWeight.Medium)
+                                Text(product.category, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Text(Money.format(product.pricePaise))
+                        }
+                    }
+                }
+                if (result.choices.isNotEmpty() && selections.size == result.choices.size && resolved == null) {
+                    Text("Quantity exceeds 99. Please split the order.", color = MaterialTheme.colorScheme.error)
+                }
+                result.notes.forEach { note ->
+                    Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                }
+                Text(
+                    "Check these items before adding them. Voice billing cannot confirm payment or change settings.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { resolved?.let(onConfirm) }, enabled = resolved != null) { Text("Add to cart") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onTryAgain) { Text("Try again") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    )
 }
 
 @Composable
@@ -632,7 +1081,11 @@ private fun ProductPanel(products: List<ProductEntity>, onAdd: (ProductEntity) -
 
 @Composable
 private fun CartPane(viewModel: BillingViewModel, modifier: Modifier = Modifier) {
-    val lines = viewModel.cartLines()
+    // Collect inside this restart scope: the catalog may still be empty on first composition.
+    // Reading StateFlow.value alone does not subscribe Compose to its later emissions.
+    val catalog by viewModel.products.collectAsState()
+    val lines = viewModel.cartLines(catalog)
+    val totalPaise = lines.sumOf { it.lineTotalPaise }
     val settings by viewModel.settings.collectAsState()
     val role = viewModel.currentUser?.role ?: UserRole.EMPLOYEE
     var checkoutDialog by remember { mutableStateOf(false) }
@@ -661,7 +1114,7 @@ private fun CartPane(viewModel: BillingViewModel, modifier: Modifier = Modifier)
         Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Total", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.weight(1f))
-            Text(Money.format(viewModel.cartTotalPaise()), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(Money.format(totalPaise), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
         Button(
             onClick = { checkoutDialog = true },
@@ -670,7 +1123,7 @@ private fun CartPane(viewModel: BillingViewModel, modifier: Modifier = Modifier)
         ) { Text(if (viewModel.isSaving) "Saving…" else "Proceed to payment") }
     }
     if (checkoutDialog) CheckoutDialog(
-        totalPaise = viewModel.cartTotalPaise(),
+        totalPaise = totalPaise,
         role = role,
         settings = settings,
         onDismiss = { checkoutDialog = false },
@@ -1404,6 +1857,7 @@ private fun CancelSaleDialog(sale: SaleEntity, onDismiss: () -> Unit, onConfirm:
 private fun ProductsScreen(viewModel: BillingViewModel) {
     val products by viewModel.products.collectAsState()
     val categories by viewModel.categories.collectAsState()
+    val settings by viewModel.settings.collectAsState()
     var editing by remember { mutableStateOf<ProductEntity?>(null) }
     var creating by remember { mutableStateOf(false) }
     var organizingCategories by remember { mutableStateOf(false) }
@@ -1454,6 +1908,8 @@ private fun ProductsScreen(viewModel: BillingViewModel) {
     }
     if (creating) ProductDialog(
         product = null,
+        voiceEnabled = settings.voiceRecognitionEnabled,
+        categoryNames = categories.map { it.name },
         onDismiss = { creating = false },
         onDelete = null,
         onSave = { name, category, price ->
@@ -1463,6 +1919,8 @@ private fun ProductsScreen(viewModel: BillingViewModel) {
     editing?.let { product ->
         ProductDialog(
             product = product,
+            voiceEnabled = settings.voiceRecognitionEnabled,
+            categoryNames = categories.map { it.name },
             onDismiss = { editing = null },
             onDelete = {
                 pendingDelete = product
@@ -1502,25 +1960,78 @@ private fun ProductsScreen(viewModel: BillingViewModel) {
 @Composable
 private fun ProductDialog(
     product: ProductEntity?,
+    voiceEnabled: Boolean,
+    categoryNames: List<String>,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
     onSave: (String, String, Long) -> Unit
 ) {
-    var name by remember(product) { mutableStateOf(product?.name.orEmpty()) }
-    var category by remember(product) { mutableStateOf(product?.category.orEmpty()) }
-    var price by remember(product) { mutableStateOf(product?.pricePaise?.div(100)?.toString().orEmpty()) }
-    val valid = name.isNotBlank() && category.isNotBlank() && (price.toLongOrNull() ?: 0) > 0
+    var name by rememberSaveable(product?.id) { mutableStateOf(product?.name.orEmpty()) }
+    var category by rememberSaveable(product?.id) { mutableStateOf(product?.category.orEmpty()) }
+    var price by rememberSaveable(product?.id) { mutableStateOf(product?.pricePaise?.div(100)?.toString().orEmpty()) }
+    val context = LocalContext.current
+    var voiceField by rememberSaveable { mutableStateOf<String?>(null) }
+    var heard by rememberSaveable { mutableStateOf<String?>(null) }
+    var proposed by rememberSaveable { mutableStateOf<String?>(null) }
+    var voiceError by rememberSaveable { mutableStateOf<String?>(null) }
+    val recognition = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (voiceEnabled && result.resultCode == Activity.RESULT_OK && voiceField != null) {
+            val text = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
+            if (!text.isNullOrBlank()) {
+                heard = text
+                proposed = when (voiceField) {
+                    "Price" -> VoiceProductInput.priceRupees(text)?.toString()
+                    "Category" -> categoryNames.firstOrNull { it.equals(text, ignoreCase = true) } ?: text
+                    else -> text
+                }
+                voiceError = if (proposed == null) "Price was unclear. Say a whole rupee amount, such as twenty or 20, or type it manually." else null
+            } else voiceError = "No speech was heard. Please try again."
+        }
+    }
+    fun launchFieldVoice() {
+        if (!voiceEnabled) return
+        val prompt = when (voiceField) {
+            "Price" -> "Say the price in whole rupees / ధర / कीमत"
+            "Category" -> "Say the category / వర్గం / श्रेणी"
+            else -> "Say the product name / ఉత్పత్తి పేరు / उत्पाद का नाम"
+        }
+        try { recognition.launch(createVoiceInputIntent(context, prompt, if (voiceField == "Category") categoryNames else emptyList())) }
+        catch (_: ActivityNotFoundException) { voiceError = "Speech recognition is unavailable. You can type the product details." }
+        catch (_: SecurityException) { voiceError = "Microphone access is unavailable. You can type the product details." }
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) launchFieldVoice() else voiceError = "Microphone permission was denied. You can still type the product details."
+    }
+    fun dictate(field: String) {
+        if (!voiceEnabled) return
+        voiceField = field
+        heard = null
+        proposed = null
+        voiceError = null
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) launchFieldVoice()
+        else permission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+    val valid = name.isNotBlank() && category.isNotBlank() &&
+        (price.toLongOrNull()?.let { it > 0 && it <= Long.MAX_VALUE / 100 } == true)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (product == null) "Add product" else "Edit product") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Product name") }, singleLine = true)
-                OutlinedTextField(category, { category = it }, label = { Text("Category") }, singleLine = true)
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (voiceEnabled) {
+                    Text("Tap a field's microphone, review the value, then Save the product.", style = MaterialTheme.typography.bodySmall)
+                    VoiceInputOptions()
+                }
+                OutlinedTextField(name, { name = it }, label = { Text("Product name") }, singleLine = true,
+                    trailingIcon = { if (voiceEnabled) IconButton(onClick = { dictate("Product name") }) { Icon(Icons.Default.Mic, "Dictate product name") } })
+                OutlinedTextField(category, { category = it }, label = { Text("Category") }, singleLine = true,
+                    trailingIcon = { if (voiceEnabled) IconButton(onClick = { dictate("Category") }) { Icon(Icons.Default.Mic, "Dictate category") } })
                 OutlinedTextField(
                     price, { price = it.filter(Char::isDigit) }, label = { Text("Price in ₹") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    trailingIcon = { if (voiceEnabled) IconButton(onClick = { dictate("Price") }) { Icon(Icons.Default.Mic, "Dictate price") } }
                 )
+                voiceError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (product != null) Text("Changing the price affects future bills only.", style = MaterialTheme.typography.bodySmall)
             }
         },
@@ -1536,6 +2047,30 @@ private fun ProductDialog(
             }
         }
     )
+    if (voiceEnabled && proposed != null && heard != null) {
+        AlertDialog(
+            onDismissRequest = { proposed = null; heard = null },
+            title = { Text("Review spoken ${voiceField?.lowercase()}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Heard: “$heard”")
+                    Text(if (voiceField == "Price") "Price: ₹$proposed" else "${voiceField}: $proposed", fontWeight = FontWeight.Bold)
+                    Text("This fills the form only. Review all fields and tap Save when ready.")
+                }
+            },
+            confirmButton = { TextButton(onClick = {
+                proposed?.let { value -> when (voiceField) {
+                    "Product name" -> name = value
+                    "Category" -> category = value
+                    "Price" -> price = value
+                    else -> Unit
+                } }
+                proposed = null; heard = null
+            }) { Text("Use value") } },
+            dismissButton = { TextButton(onClick = { proposed = null; heard = null }) { Text("Cancel") } }
+        )
+    }
+
 }
 
 @Composable
@@ -1675,6 +2210,9 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
     var printerPaperWidthMm by remember(settings.updatedAt) { mutableStateOf(settings.printerPaperWidthMm) }
     var printerAutoPrint by remember(settings.updatedAt) { mutableStateOf(settings.printerAutoPrint) }
     var upiQrImageUri by remember(settings.updatedAt) { mutableStateOf(settings.upiQrImageUri) }
+    var voiceRecognitionEnabled by remember(settings.updatedAt) {
+        mutableStateOf(settings.voiceRecognitionEnabled)
+    }
     var confirmEraseAllData by remember { mutableStateOf(false) }
     var bluetoothPermissionGranted by remember {
         mutableStateOf(hasBluetoothConnectPermission(context))
@@ -1766,6 +2304,22 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
                         pricesIncludeTax
                     ) { pricesIncludeTax = it }
                 }
+            }
+        }
+
+        OutlinedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingToggle(
+                    "Voice input",
+                    "Show microphones in Billing and Add/Edit product. Review spoken values before applying them.",
+                    voiceRecognitionEnabled
+                ) { voiceRecognitionEnabled = it }
+                if (voiceRecognitionEnabled) VoiceInputOptions()
+                Text(
+                    "When used, Android's selected speech service processes microphone audio. Quick Customer keeps only the recognized text temporarily and does not store recordings.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 
@@ -1894,7 +2448,7 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Privacy and local data", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "Quick Customer stores shop users, products, bills, expenses, inventory, settings, and QR images on this device. The current version does not send this data to a Quick Customer server.",
+                    "Quick Customer stores shop users, products, bills, expenses, inventory, settings, and QR images on this device. When the owner connects Google Drive, a store snapshot is also saved in that Google account's private application-data folder so linked devices can restore or monitor the shop.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1933,7 +2487,8 @@ private fun SettingsScreen(viewModel: BillingViewModel) {
                         printerAddress = printerAddress,
                         printerPaperWidthMm = printerPaperWidthMm,
                         printerAutoPrint = printerEnabled && printerAutoPrint,
-                        upiQrImageUri = upiQrImageUri
+                        upiQrImageUri = upiQrImageUri,
+                        voiceRecognitionEnabled = voiceRecognitionEnabled
                     )
                 )
             },
