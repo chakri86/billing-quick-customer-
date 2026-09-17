@@ -709,24 +709,17 @@ private fun BillingScreen(viewModel: BillingViewModel) {
     Column(Modifier.fillMaxSize()) {
         if (settings.voiceRecognitionEnabled) {
             Surface(tonalElevation = 2.dp) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
                 Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     FilledTonalButton(onClick = ::startVoiceBilling) {
                         Icon(Icons.Default.Mic, null)
                         Spacer(Modifier.width(6.dp))
                         Text("Voice billing")
                     }
-                    Text(
-                        "Say coffee, two tea, or tea two.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                VoiceInputOptions()
+                    VoiceInputOptions(compact = true, modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -819,17 +812,25 @@ private fun createVoiceInputIntent(context: Context, prompt: String?, bias: List
 }
 
 @Composable
-private fun VoiceInputOptions() {
+private fun VoiceInputOptions(compact: Boolean = false, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val preferences = remember(context) { context.getSharedPreferences("voice_input", Context.MODE_PRIVATE) }
     var language by remember { mutableStateOf(preferences.getString("language", "en-IN") ?: "en-IN") }
     var mixed by remember { mutableStateOf(preferences.getBoolean("mixed", false)) }
     var expanded by remember { mutableStateOf(false) }
+    var showOptions by remember { mutableStateOf(false) }
     val languages = listOf("en-IN" to "English", "te-IN" to "తెలుగు (Telugu)", "hi-IN" to "हिन्दी (Hindi)")
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box {
+    val supportsSwitching = Build.VERSION.SDK_INT >= 34
+    val languageSelector: @Composable (Modifier, Boolean) -> Unit = { selectorModifier, short ->
+        Box(selectorModifier) {
             TextButton(onClick = { expanded = true }) {
-                Text("Speech language: ${languages.firstOrNull { it.first == language }?.second ?: "English"} ▾")
+                val label = if (short) when (language) {
+                    "te-IN" -> "తెలుగు"
+                    "hi-IN" -> "हिन्दी"
+                    else -> "English"
+                } else languages.firstOrNull { it.first == language }?.second ?: "English"
+                Text("${if (short) "" else "Speech language: "}$label${if (short && mixed && supportsSwitching) " · Auto" else ""} ▾",
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 languages.forEach { (tag, label) ->
@@ -841,17 +842,44 @@ private fun VoiceInputOptions() {
                 }
             }
         }
-        if (Build.VERSION.SDK_INT >= 34) {
+    }
+    val switchingOptions: @Composable () -> Unit = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = mixed, onCheckedChange = {
+                Checkbox(checked = mixed && supportsSwitching, enabled = supportsSwitching, onCheckedChange = {
                     mixed = it
                     preferences.edit().putBoolean("mixed", it).apply()
                 })
                 Text("Try automatic English / Telugu / Hindi switching", style = MaterialTheme.typography.bodySmall)
             }
-            if (mixed) Text("Requires support and downloaded language models in your speech service. If recognition fails, turn this off and choose your main language.", style = MaterialTheme.typography.bodySmall)
-        } else {
-            Text("For mixed orders, select the language you speak most. Automatic switching is unavailable on this Android version.", style = MaterialTheme.typography.bodySmall)
+            Text(if (supportsSwitching) {
+                "Automatic switching needs a compatible speech service and downloaded English, Telugu and Hindi models. If it fails, turn it off and choose your main language."
+            } else {
+                "Automatic switching requires Android 14 or newer. This device uses Android ${Build.VERSION.RELEASE}. Choose English, Telugu or Hindi manually."
+            }, style = MaterialTheme.typography.bodySmall)
+    }
+    if (compact) {
+        Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+            languageSelector(Modifier.weight(1f), true)
+            IconButton(onClick = { showOptions = true }) {
+                Icon(Icons.Default.Settings, contentDescription = "Voice options")
+            }
+        }
+        if (showOptions) AlertDialog(
+            onDismissRequest = { showOptions = false },
+            title = { Text("Voice options") },
+            text = {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Say coffee, two tea, or tea two. Check the items before adding them.")
+                    switchingOptions()
+                }
+            },
+            confirmButton = { TextButton(onClick = { showOptions = false }) { Text("Done") } }
+        )
+    } else {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            languageSelector(Modifier, false)
+            switchingOptions()
         }
     }
 }

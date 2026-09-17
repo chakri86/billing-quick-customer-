@@ -2,7 +2,11 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.9.6
+## Included in version 0.9.7
+
+Billing uses a compact voice toolbar with a microphone, language dropdown and Voice options button. Examples and automatic-switching help are in the popup. On Android below 14 the automatic-switching checkbox is disabled and explains the version requirement; manual English/Telugu/Hindi selection remains available. Android 14+ only permits requesting automatic switching: actual support still depends on the speech service and downloaded models. See [Android RecognizerIntent](https://developer.android.com/reference/android/speech/RecognizerIntent#EXTRA_ENABLE_LANGUAGE_SWITCH).
+
+Device checks: verify the compact row in tablet landscape/portrait and on a phone; open Voice options; check the disabled explanation on Android below 14 and the toggle on API 34+; change language and reopen the app to check persistence; confirm voice, tap-to-cart and product suggestions still work.
 
 The cart now observes catalog loading directly, fixing a startup timing issue where tap and voice additions could remain invisible. Displayed totals and checkout totals use the same cart lines. Device regression check: force-close and reopen, log in, tap a product, confirm a voice item, and verify quantity, total and Proceed update immediately on tablet and phone. No data reset or migration is needed.
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.7 — Compact voice billing toolbar
+
+- Replace the tall voice banner with one row: microphone button, language selector and Voice options icon.
+- Move command examples and automatic-switching help into a scrollable popup.
+- Show automatic switching disabled on Android below 14, with the device Android version and manual-language guidance.
+- Retain the API 34 speech-switching gate, saved language preferences, voice choices and cart refresh fix.
+
 ## 0.9.6 — Observe catalog loading in the cart
 
 - Subscribe the cart's own Compose scope to product updates so a cold-start empty catalog cannot leave tap/voice additions invisible.
