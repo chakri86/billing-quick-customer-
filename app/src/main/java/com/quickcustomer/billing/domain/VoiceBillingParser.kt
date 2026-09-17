@@ -176,9 +176,15 @@ object VoiceBillingParser {
                 if (suggestions.isEmpty()) null else NameMatch(end, suggestions, spoken, suggested = true)
             }
         }
-        fun signature(items: List<HeardItem>): Map<List<String>, Int> =
-            items.groupBy { it.products.map { product -> product.id }.sorted() }
+        fun signature(items: List<HeardItem>): Pair<Map<String, Int>, List<Pair<List<String>, Int>>> {
+            val fixed = items.filter { it.products.size == 1 && !it.suggested }
+                .groupBy { it.products.single().id }
                 .mapValues { (_, entries) -> entries.sumOf { it.quantity } }
+            // Separate occurrences may be assigned to different products by the cashier.
+            val choices = items.filter { it.products.size > 1 || it.suggested }
+                .map { it.products.map { product -> product.id }.sorted() to it.quantity }
+            return fixed to choices
+        }
         fun walk(start: Int): List<List<HeardItem>> {
             if (start == tokens.size) return listOf(emptyList())
             memo[start]?.let { return it }

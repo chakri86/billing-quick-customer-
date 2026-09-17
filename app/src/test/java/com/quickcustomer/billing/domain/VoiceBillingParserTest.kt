@@ -50,10 +50,12 @@ class VoiceBillingParserTest {
 
     @Test
     fun quantityAmbiguityStillBlocksEvenWithDuplicateNames() {
-        val result = VoiceBillingParser.parse("rose milk two coffee", products + roseProducts)
-        assertTrue(result.items.isEmpty())
-        assertTrue(result.choices.isEmpty())
-        assertEquals(null, VoiceBillingParser.resolve(result, emptyMap()))
+        listOf("rose milk two coffee", "rose milk two rose milk").forEach { phrase ->
+            val result = VoiceBillingParser.parse(phrase, products + roseProducts)
+            assertTrue(result.items.isEmpty())
+            assertTrue(result.choices.isEmpty())
+            assertEquals(null, VoiceBillingParser.resolve(result, emptyMap()))
+        }
     }
 
     @Test
