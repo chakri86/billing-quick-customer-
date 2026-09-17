@@ -2,7 +2,9 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.9.5
+## Included in version 0.9.6
+
+The cart now observes catalog loading directly, fixing a startup timing issue where tap and voice additions could remain invisible. Displayed totals and checkout totals use the same cart lines. Device regression check: force-close and reopen, log in, tap a product, confirm a voice item, and verify quantity, total and Proceed update immediately on tablet and phone. No data reset or migration is needed.
 
 Voice review now shows tappable choices for duplicate product names, including category and current price. Matches in the selected category appear first, but none is selected automatically. Every unclear item must be selected before Add to cart becomes available. Clear items and quantities are retained. Product-only orders still default to one; prefix/suffix quantities remain supported.
 

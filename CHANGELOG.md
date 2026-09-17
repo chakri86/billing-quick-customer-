@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.6 — Observe catalog loading in the cart
+
+- Subscribe the cart's own Compose scope to product updates so a cold-start empty catalog cannot leave tap/voice additions invisible.
+- Calculate the displayed and checkout totals from the same visible cart lines.
+- Preserve voice choices, prices, data and signing identity; no database migration.
+
 ## 0.9.5 — Tap to resolve voice product suggestions
 
 - Offer every matching active product for duplicate names, with category and current price.

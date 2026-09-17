@@ -319,7 +319,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
     fun selectCategory(category: String) { selectedCategory = category }
 
-    fun cartLines(): List<CartLine> = (products.value + miscProducts.values).mapNotNull { product ->
+    fun cartLines(catalog: List<ProductEntity> = products.value): List<CartLine> = (catalog + miscProducts.values).mapNotNull { product ->
         quantities[product.id]?.takeIf { it > 0 }?.let { CartLine(product, it) }
     }
 

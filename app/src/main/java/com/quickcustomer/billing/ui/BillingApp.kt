@@ -1053,7 +1053,11 @@ private fun ProductPanel(products: List<ProductEntity>, onAdd: (ProductEntity) -
 
 @Composable
 private fun CartPane(viewModel: BillingViewModel, modifier: Modifier = Modifier) {
-    val lines = viewModel.cartLines()
+    // Collect inside this restart scope: the catalog may still be empty on first composition.
+    // Reading StateFlow.value alone does not subscribe Compose to its later emissions.
+    val catalog by viewModel.products.collectAsState()
+    val lines = viewModel.cartLines(catalog)
+    val totalPaise = lines.sumOf { it.lineTotalPaise }
     val settings by viewModel.settings.collectAsState()
     val role = viewModel.currentUser?.role ?: UserRole.EMPLOYEE
     var checkoutDialog by remember { mutableStateOf(false) }
@@ -1082,7 +1086,7 @@ private fun CartPane(viewModel: BillingViewModel, modifier: Modifier = Modifier)
         Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Total", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.weight(1f))
-            Text(Money.format(viewModel.cartTotalPaise()), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(Money.format(totalPaise), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
         Button(
             onClick = { checkoutDialog = true },
@@ -1091,7 +1095,7 @@ private fun CartPane(viewModel: BillingViewModel, modifier: Modifier = Modifier)
         ) { Text(if (viewModel.isSaving) "Saving…" else "Proceed to payment") }
     }
     if (checkoutDialog) CheckoutDialog(
-        totalPaise = viewModel.cartTotalPaise(),
+        totalPaise = totalPaise,
         role = role,
         settings = settings,
         onDismiss = { checkoutDialog = false },
