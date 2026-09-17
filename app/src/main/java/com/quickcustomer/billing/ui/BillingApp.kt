@@ -771,9 +771,10 @@ private fun BillingScreen(viewModel: BillingViewModel) {
     pendingVoiceResult?.let { result ->
         VoiceBillingConfirmationDialog(
             result = result,
+            selectedCategory = viewModel.selectedCategory,
             onDismiss = { pendingVoiceResult = null },
-            onConfirm = {
-                viewModel.addVoiceItems(result.items)
+            onConfirm = { items ->
+                viewModel.addVoiceItems(items)
                 pendingVoiceResult = null
             },
             onTryAgain = {
@@ -858,17 +859,20 @@ private fun VoiceInputOptions() {
 @Composable
 private fun VoiceBillingConfirmationDialog(
     result: VoiceBillingParseResult,
+    selectedCategory: String?,
     onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
+    onConfirm: (List<com.quickcustomer.billing.domain.VoiceCartItem>) -> Unit,
     onTryAgain: () -> Unit
 ) {
+    var selections by remember(result) { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    val resolved = VoiceBillingParser.resolve(result, selections)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Confirm voice items") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Heard: “${result.transcript}”", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (result.items.isEmpty()) {
+                if (result.items.isEmpty() && result.choices.isEmpty()) {
                     Text("No products are ready to add.", color = MaterialTheme.colorScheme.error)
                 } else {
                     result.items.forEach { item ->
@@ -877,6 +881,26 @@ private fun VoiceBillingConfirmationDialog(
                             Text("× ${item.quantity}", fontWeight = FontWeight.Bold)
                         }
                     }
+                }
+                result.choices.forEachIndexed { index, choice ->
+                    Text("Choose for ‘${choice.spoken}’ · Quantity: ${choice.quantity}", fontWeight = FontWeight.Medium)
+                    choice.products.sortedBy { if (it.category == selectedCategory) 0 else 1 }.forEach { product ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { selections = selections + (index to product.id) }.padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = selections[index] == product.id,
+                                onClick = { selections = selections + (index to product.id) })
+                            Column(Modifier.weight(1f)) {
+                                Text(product.name, fontWeight = FontWeight.Medium)
+                                Text(product.category, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Text(Money.format(product.pricePaise))
+                        }
+                    }
+                }
+                if (result.choices.isNotEmpty() && selections.size == result.choices.size && resolved == null) {
+                    Text("Quantity exceeds 99. Please split the order.", color = MaterialTheme.colorScheme.error)
                 }
                 result.notes.forEach { note ->
                     Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
@@ -889,7 +913,7 @@ private fun VoiceBillingConfirmationDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onConfirm, enabled = result.items.isNotEmpty()) { Text("Add to cart") }
+            Button(onClick = { resolved?.let(onConfirm) }, enabled = resolved != null) { Text("Add to cart") }
         },
         dismissButton = {
             Row {

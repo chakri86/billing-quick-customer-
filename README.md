@@ -2,7 +2,13 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.9.4
+## Included in version 0.9.5
+
+Voice review now shows tappable choices for duplicate product names, including category and current price. Matches in the selected category appear first, but none is selected automatically. Every unclear item must be selected before Add to cart becomes available. Clear items and quantities are retained. Product-only orders still default to one; prefix/suffix quantities remain supported.
+
+When no catalog name matches, up to five close spelling suggestions may appear and always require an explicit tap. This is catalog matching, not a new speech engine, and cannot fix every transcription. Quantity ambiguity still asks for a clearer order. No database migration or Google authorization changes are required.
+
+Device checks for 0.9.5: say “Rose milk”, “two rose milk”, and “rose milk two”; verify all active duplicates show their current category/price, selected-category matches appear first, Add to cart stays disabled until selection, and the chosen product/quantity enters the cart only after confirmation. Test “coffee and rose milk”, repeated Rose Milk, cancel/retry, and a near spelling such as “rose mil”. Check long lists scroll on phone and tablet. Automated tests do not replace device microphone/UI testing.
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support

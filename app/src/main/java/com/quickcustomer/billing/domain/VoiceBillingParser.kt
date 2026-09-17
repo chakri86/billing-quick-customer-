@@ -13,8 +13,11 @@ data class VoiceCartItem(
 data class VoiceBillingParseResult(
     val transcript: String,
     val items: List<VoiceCartItem>,
-    val notes: List<String>
+    val notes: List<String>,
+    val choices: List<VoiceProductChoice> = emptyList()
 )
+
+data class VoiceProductChoice(val spoken: String, val quantity: Int, val products: List<ProductEntity>)
 
 object VoiceBillingParser {
     private val numberWords = mapOf(
@@ -93,8 +96,8 @@ object VoiceBillingParser {
         "బ్లాక్" to "black", "ब्लैक" to "black", "కార్న్" to "corn", "कॉर्न" to "corn"
     )
 
-    private data class HeardItem(val product: ProductEntity, val quantity: Int, val spoken: String)
-    private data class NameMatch(val end: Int, val products: List<ProductEntity>, val spoken: String)
+    private data class HeardItem(val products: List<ProductEntity>, val quantity: Int, val spoken: String, val suggested: Boolean = false)
+    private data class NameMatch(val end: Int, val products: List<ProductEntity>, val spoken: String, val suggested: Boolean = false)
 
     fun parse(transcript: String, products: List<ProductEntity>): VoiceBillingParseResult {
         val activeProducts = products.filter { it.isActive && !it.isDeleted }
@@ -124,14 +127,34 @@ object VoiceBillingParser {
         }
         val matched = linkedMapOf<String, VoiceCartItem>()
         val notes = mutableListOf<String>()
+        val choices = mutableListOf<VoiceProductChoice>()
         parsed.forEach { heard ->
-            val product = heard.product
+            if (heard.products.size > 1 || heard.suggested) {
+                choices += VoiceProductChoice(heard.spoken, heard.quantity, heard.products)
+                return@forEach
+            }
+            val product = heard.products.single()
             val total = (matched[product.id]?.quantity ?: 0) + heard.quantity
             if (total > 99) return rejected("Quantity exceeds 99. Please split the order.")
             matched[product.id] = VoiceCartItem(product.id, product.name, total)
             if (normalize(product.name) != heard.spoken) notes += "'${heard.spoken}' matched ${product.name}."
         }
-        return VoiceBillingParseResult(transcript.trim(), matched.values.toList(), notes.distinct())
+        return VoiceBillingParseResult(transcript.trim(), matched.values.toList(), notes.distinct(), choices)
+    }
+
+    // Revalidate explicit selections and aggregate repeated items before enabling confirmation.
+    fun resolve(result: VoiceBillingParseResult, selections: Map<Int, String>): List<VoiceCartItem>? {
+        val items = result.items.toMutableList()
+        result.choices.forEachIndexed { index, choice ->
+            val product = choice.products.singleOrNull { it.id == selections[index] } ?: return null
+            items += VoiceCartItem(product.id, product.name, choice.quantity)
+        }
+        val merged = items.groupBy { it.productId }.map { (_, entries) ->
+            val quantity = entries.sumOf { it.quantity }
+            if (quantity !in 1..99) return null
+            entries.first().copy(quantity = quantity)
+        }
+        return merged.takeIf { it.isNotEmpty() }
     }
 
     private fun parseClause(tokens: List<String>, products: List<ProductEntity>): List<List<HeardItem>> {
@@ -145,10 +168,16 @@ object VoiceBillingParser {
                 val spoken = tokens.subList(start, stop).joinToString(" ")
                 val matches = findProducts(spoken, products, allowPartial = stop == end)
                 if (matches.isEmpty()) null else NameMatch(stop, matches, spoken)
+            } ?: run {
+                // Only suggest for a complete name span, never drop unknown words.
+                val spoken = tokens.subList(start, end).joinToString(" ")
+                val suggestions = nearbyProducts(spoken, products)
+                if (suggestions.isEmpty()) null else NameMatch(end, suggestions, spoken, suggested = true)
             }
         }
-        fun signature(items: List<HeardItem>): Map<String, Int> =
-            items.groupBy { it.product.id }.mapValues { (_, entries) -> entries.sumOf { it.quantity } }
+        fun signature(items: List<HeardItem>): Map<List<String>, Int> =
+            items.groupBy { it.products.map { product -> product.id }.sorted() }
+                .mapValues { (_, entries) -> entries.sumOf { it.quantity } }
         fun walk(start: Int): List<List<HeardItem>> {
             if (start == tokens.size) return listOf(emptyList())
             memo[start]?.let { return it }
@@ -161,14 +190,12 @@ object VoiceBillingParser {
             }
             val results = mutableListOf<List<HeardItem>>()
             for ((quantity, next) in quantities) {
-                for (product in name.products) {
                     for (tail in walk(next)) {
-                        val candidate = listOf(HeardItem(product, quantity, name.spoken)) + tail
+                        val candidate = listOf(HeardItem(name.products, quantity, name.spoken, name.suggested)) + tail
                         if (results.none { signature(it) == signature(candidate) }) results += candidate
                         // Two distinct carts are sufficient to establish ambiguity.
                         if (results.size == 2) return results.also { memo[start] = it }
                     }
-                }
             }
             return results.also { memo[start] = it }
         }
@@ -195,6 +222,25 @@ object VoiceBillingParser {
 
     private fun canonicalName(value: String): String = normalize(value).split(' ')
         .joinToString(" ") { productAliases[it] ?: it }
+
+    private fun nearbyProducts(spoken: String, products: List<ProductEntity>): List<ProductEntity> {
+        if (spoken.length !in 4..80) return emptyList()
+        val limit = if (spoken.length < 8) 1 else 2
+        return products.mapNotNull { product ->
+            val name = canonicalName(product.name)
+            if (kotlin.math.abs(name.length - spoken.length) > limit || name.length > 80) return@mapNotNull null
+            var row = IntArray(name.length + 1) { it }
+            spoken.forEachIndexed { i, char ->
+                val next = IntArray(name.length + 1)
+                next[0] = i + 1
+                name.forEachIndexed { j, other ->
+                    next[j + 1] = minOf(next[j] + 1, row[j + 1] + 1, row[j] + if (char == other) 0 else 1)
+                }
+                row = next
+            }
+            row.last().takeIf { it in 1..limit }?.let { product to it }
+        }.sortedBy { it.second }.take(5).map { it.first }
+    }
 
     private fun isQuantityToken(token: String): Boolean =
         token.all(Char::isDigit) || token in numberWords

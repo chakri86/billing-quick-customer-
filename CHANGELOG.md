@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.5 — Tap to resolve voice product suggestions
+
+- Offer every matching active product for duplicate names, with category and current price.
+- Put the selected category first without silently selecting a product.
+- Preserve clear order items and spoken/default quantities; require every choice before Add to cart.
+- Offer up to five close spelling suggestions when no name matches; even a single suggestion requires selection.
+- Retain quantity-ambiguity rejection and enforce the 99-per-product limit after choices are merged.
+- Add duplicate-name, selection, inactive-product, suggestion and quantity regression tests. No database migration.
+
 ## 0.9.4 — Flexible voice quantities and targeted name corrections
 
 - Default product-only orders to one, and accept quantities before or after product names.

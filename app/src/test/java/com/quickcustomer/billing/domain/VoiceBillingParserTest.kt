@@ -6,6 +6,66 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VoiceBillingParserTest {
+    private val roseProducts = listOf(
+        ProductEntity("rose-milk", "Milk", "Rose Milk", 1500, 0),
+        ProductEntity("rose-flavoured", "Flavoured Milk", "Rose Milk", 5500, 1),
+        ProductEntity("rose-large", "Large Drinks", "Rose Milk", 7500, 2)
+    )
+
+    @Test
+    fun duplicateNamesOfferEveryProductAndRequireAnExplicitSelection() {
+        listOf("rose milk", "two rose milk", "rose milk two").forEach { phrase ->
+            val result = VoiceBillingParser.parse(phrase, roseProducts)
+            assertTrue(result.items.isEmpty())
+            assertEquals(3, result.choices.single().products.size)
+            assertEquals(null, VoiceBillingParser.resolve(result, emptyMap()))
+            assertEquals(null, VoiceBillingParser.resolve(result, mapOf(0 to "not-a-product")))
+            val resolved = VoiceBillingParser.resolve(result, mapOf(0 to "rose-flavoured"))!!
+            assertEquals("rose-flavoured", resolved.single().productId)
+            assertEquals(if (phrase == "rose milk") 1 else 2, resolved.single().quantity)
+            assertEquals(5500L, result.choices.single().products[1].pricePaise)
+        }
+    }
+
+    @Test
+    fun clearItemsAreRetainedButCannotConfirmUntilAllChoicesAreResolved() {
+        val result = VoiceBillingParser.parse("two coffee and rose milk and rose milk three", products + roseProducts)
+        assertEquals(2, result.items.single().quantity)
+        assertEquals(2, result.choices.size)
+        assertEquals(null, VoiceBillingParser.resolve(result, mapOf(0 to "rose-milk")))
+        val resolved = VoiceBillingParser.resolve(result, mapOf(0 to "rose-milk", 1 to "rose-milk"))!!
+        assertEquals(4, resolved.single { it.productId == "rose-milk" }.quantity)
+        assertEquals(2, resolved.single { it.productId == "bru-coffee" }.quantity)
+    }
+
+    @Test
+    fun duplicateSelectionCannotExceedQuantityLimitOrIncludeInactiveProducts() {
+        val result = VoiceBillingParser.parse("99 rose milk and rose milk", roseProducts)
+        assertEquals(null, VoiceBillingParser.resolve(result, mapOf(0 to "rose-milk", 1 to "rose-milk")))
+        val activeOnly = VoiceBillingParser.parse("rose milk", listOf(roseProducts[0],
+            roseProducts[1].copy(isActive = false), roseProducts[2].copy(isDeleted = true)))
+        assertTrue(activeOnly.choices.isEmpty())
+        assertEquals("rose-milk", activeOnly.items.single().productId)
+    }
+
+    @Test
+    fun quantityAmbiguityStillBlocksEvenWithDuplicateNames() {
+        val result = VoiceBillingParser.parse("rose milk two coffee", products + roseProducts)
+        assertTrue(result.items.isEmpty())
+        assertTrue(result.choices.isEmpty())
+        assertEquals(null, VoiceBillingParser.resolve(result, emptyMap()))
+    }
+
+    @Test
+    fun NearbySpellingRequiresTapEvenWhenOnlyOneSuggestionExists() {
+        val result = VoiceBillingParser.parse("rose mil two", roseProducts.take(1))
+        assertTrue(result.items.isEmpty())
+        assertEquals(2, result.choices.single().quantity)
+        assertEquals(null, VoiceBillingParser.resolve(result, emptyMap()))
+        assertEquals(2, VoiceBillingParser.resolve(result, mapOf(0 to "rose-milk"))!!.single().quantity)
+        assertTrue(VoiceBillingParser.parse("pizza", roseProducts).choices.isEmpty())
+    }
+
     private val products = listOf(
         ProductEntity("dum-tea", "Teas", "Dum Tea", 1_200, 0),
         ProductEntity("ginger-tea", "Teas", "Ginger Tea", 1_500, 1),
