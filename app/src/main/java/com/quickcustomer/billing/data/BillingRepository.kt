@@ -208,7 +208,6 @@ class BillingRepository(private val db: AppDatabase) {
 
     suspend fun cancelHeldOrder(id: String, actor: UserEntity, reason: String) = db.withTransaction {
         val order = resumeOrder(id, actor)
-        require(reason.trim().length >= 3) { "Enter a cancellation reason (at least 3 characters)." }
         db.heldOrderDao().save(order.copy(status = "CANCELLED", updatedAt = System.currentTimeMillis(),
             cancellationReason = reason.trim(), cancelledByName = actor.displayName))
     }
@@ -310,7 +309,7 @@ class BillingRepository(private val db: AppDatabase) {
 
     suspend fun cancelSale(sale: SaleEntity, actor: UserEntity, reason: String) = db.withTransaction {
         require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
-        require(reason.trim().length >= 3) { "Enter a cancellation reason." }
+        require(reason.isNotBlank()) { "Enter a cancellation reason." }
         val changed = db.saleDao().cancel(
             saleId = sale.id,
             cancelledAt = System.currentTimeMillis(),

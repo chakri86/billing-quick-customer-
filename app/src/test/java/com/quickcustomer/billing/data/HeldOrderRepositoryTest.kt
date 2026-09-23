@@ -55,11 +55,11 @@ class HeldOrderRepositoryTest {
 
     @Test fun cancelledHoldRetainsItemsAndCannotResumeOrBecomeSale() = runBlocking {
         val held = repository.holdOrder(null, "Customer A", actor, lines)
-        repository.cancelHeldOrder(held.id, actor, "Customer left")
+        repository.cancelHeldOrder(held.id, actor, "x")
         val cancelled = requireNotNull(db.heldOrderDao().get(held.id))
         assertEquals("CANCELLED", cancelled.status)
         assertEquals(lines, cancelled.lines())
-        assertEquals("Customer left", cancelled.cancellationReason)
+        assertEquals("x", cancelled.cancellationReason)
         assertTrue(runCatching { repository.resumeOrder(held.id, actor) }.isFailure)
         assertTrue(runCatching { pay(held.id, 5500) }.isFailure)
         assertTrue(repository.exportStoreSnapshot().sales.isEmpty())
@@ -98,7 +98,7 @@ class HeldOrderRepositoryTest {
         val held = repository.holdOrder(null, "Sync", actor, lines)
         val saved = repository.exportStoreSnapshot()
         assertEquals(lines, saved.heldOrders.single().lines())
-        repository.cancelHeldOrder(held.id, actor, "Customer left")
+        repository.cancelHeldOrder(held.id, actor, "")
         val cancelled = repository.exportStoreSnapshot()
         repository.importStoreSnapshot(saved)
         assertEquals("HELD", db.heldOrderDao().get(held.id)?.status)

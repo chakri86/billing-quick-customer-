@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.9.8
+## Included in version 0.9.9
 
 Billing uses a compact voice toolbar with a microphone, language dropdown and Voice options button. Examples and automatic-switching help are in the popup. On Android below 14 the automatic-switching checkbox is disabled and explains the version requirement; manual English/Telugu/Hindi selection remains available. Android 14+ only permits requesting automatic switching: actual support still depends on the speech service and downloaded models. See [Android RecognizerIntent](https://developer.android.com/reference/android/speech/RecognizerIntent#EXTRA_ENABLE_LANGUAGE_SWITCH).
 
@@ -195,7 +195,7 @@ Targeted recognition corrections map `brew` to `BRU` and `dumpty` to `Dum Tea` w
 Device validation: say coffee; two tea; tea two; tea two coffee three; two tea and coffee; brew tea; two brew tea; dumpty; dumpty two. Confirm the actual product and quantity shown. Also try an unknown product and an ambiguous partial name; neither should silently add items.
 
 
-### Holding an unpaid order (v0.9.8)
+### Holding an unpaid order (v0.9.9)
 
 On Billing, tap **Hold bill**, optionally enter a customer/table label, then tap
 **Save and start next bill**. The cart clears only after the order is saved locally.
@@ -205,14 +205,14 @@ first customer returns. Hold or finish any current cart before resuming another.
 Saved orders retain their product names, categories, prices, quantities and Misc
 items across restarts. After editing a resumed order, tap **Hold bill** again to
 save those edits before leaving it. Payment completes it once and removes its hold.
-To abandon it, use **Cancel order**, enter a reason, and find it under the
+To abandon it, use **Cancel order**, optionally enter a reason, and find it under the
 **Cancelled** tab in Saved orders. These unpaid cancellations are separate from
 cancellations of completed sales; neither held orders nor cancelled unpaid orders
 count as sales or deduct stock. Employees manage their own held orders; Admin and
 Super User can manage all. The monitoring device remains read-only.
 
 Drive snapshots now include held orders (format 2). Update both primary and
-monitor devices to v0.9.8 before synchronizing. Local holding also works offline.
+monitor devices to v0.9.9 before synchronizing. Local holding also works offline.
 
 Tablet acceptance check: hold a multi-item order including Misc; complete a
 second customer's order; restart the app; resume the first order and verify its

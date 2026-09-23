@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.9 — Cancellation reason adjustment
+
+- Held-order cancellation reasons are optional; a single character is accepted.
+- Completed-bill cancellation still requires a reason, but accepts a single character.
+
+
 ## 0.9.8 — Hold and resume bills
 
 - Save multiple unpaid orders with labels and frozen product/price/quantity snapshots.

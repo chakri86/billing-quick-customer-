@@ -65,9 +65,9 @@ internal fun HeldOrdersDialog(viewModel: BillingViewModel, onDismiss: () -> Unit
         AlertDialog(
             onDismissRequest = { cancelOrder = null },
             title = { Text("Cancel held order?") },
-            text = { OutlinedTextField(value = reason, onValueChange = { reason = it }, label = { Text("Reason") }) },
+            text = { OutlinedTextField(value = reason, onValueChange = { reason = it }, label = { Text("Reason (optional)") }) },
             confirmButton = {
-                TextButton(enabled = reason.trim().length >= 3 && !viewModel.isSaving, onClick = {
+                TextButton(enabled = !viewModel.isSaving, onClick = {
                     viewModel.cancelHeldOrder(order, reason)
                     cancelOrder = null
                 }) { Text("Cancel order") }

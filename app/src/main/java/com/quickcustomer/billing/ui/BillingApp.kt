@@ -1879,7 +1879,7 @@ private fun CancelSaleDialog(sale: SaleEntity, onDismiss: () -> Unit, onConfirm:
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(reason.trim()) }, enabled = reason.trim().length >= 3) { Text("Cancel bill") }
+            Button(onClick = { onConfirm(reason.trim()) }, enabled = reason.isNotBlank()) { Text("Cancel bill") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Keep bill") } }
     )
