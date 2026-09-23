@@ -54,3 +54,15 @@ jobs:
             app/build/outputs/bundle/release/app-release.aab
             app/schemas/
           if-no-files-found: error
+
+      - name: Collect APK signing library
+        run: |
+          mkdir -p signing-tools
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" signing-tools/apksigner.jar
+
+      - name: Upload signing library
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-signing-library
+          path: signing-tools/apksigner.jar
+          if-no-files-found: error

@@ -77,6 +77,37 @@ class HeldOrderRepositoryTest {
         assertTrue(runCatching { repository.cancelHeldOrder(held.id, employee, "left") }.isFailure)
     }
 
+    @Test fun migrationAddsHeldOrdersWithoutLosingExistingProducts() = runBlocking {
+        db.productDao().insertAll(listOf(lines.first().product))
+        // Simulate the previous schema: v9 differs from v8 only by this new table.
+        db.openHelper.writableDatabase.apply {
+            execSQL("DROP TABLE held_orders")
+            version = 8
+        }
+        db.close()
+        db = Room.databaseBuilder(RuntimeEnvironment.getApplication(), AppDatabase::class.java, "held-test")
+            .addMigrations(AppDatabase.MIGRATION_8_9).allowMainThreadQueries().build()
+        repository = BillingRepository(db)
+        assertEquals("Tea", repository.exportStoreSnapshot().products.single().name)
+        assertTrue(db.heldOrderDao().all().isEmpty())
+        repository.holdOrder(null, "After upgrade", actor, lines)
+        assertEquals(1, db.heldOrderDao().all().size)
+    }
+
+    @Test fun snapshotsCarryHoldsAndRemoveConsumedOrdersOnMonitor() = runBlocking {
+        val held = repository.holdOrder(null, "Sync", actor, lines)
+        val saved = repository.exportStoreSnapshot()
+        assertEquals(lines, saved.heldOrders.single().lines())
+        repository.cancelHeldOrder(held.id, actor, "Customer left")
+        val cancelled = repository.exportStoreSnapshot()
+        repository.importStoreSnapshot(saved)
+        assertEquals("HELD", db.heldOrderDao().get(held.id)?.status)
+        repository.importStoreSnapshot(cancelled)
+        assertEquals("CANCELLED", db.heldOrderDao().get(held.id)?.status)
+        repository.importStoreSnapshot(saved.copy(heldOrders = emptyList()))
+        assertTrue(db.heldOrderDao().all().isEmpty())
+    }
+
     private suspend fun pay(id: String, cash: Long) = repository.completeSale(
         actor, lines, PaymentMethod.CASH, 0, cash, ShopSettingsEntity(), heldOrderId = id
     )
