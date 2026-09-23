@@ -2,7 +2,7 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.9.7
+## Included in version 0.9.8
 
 Billing uses a compact voice toolbar with a microphone, language dropdown and Voice options button. Examples and automatic-switching help are in the popup. On Android below 14 the automatic-switching checkbox is disabled and explains the version requirement; manual English/Telugu/Hindi selection remains available. Android 14+ only permits requesting automatic switching: actual support still depends on the speech service and downloaded models. See [Android RecognizerIntent](https://developer.android.com/reference/android/speech/RecognizerIntent#EXTRA_ENABLE_LANGUAGE_SWITCH).
 

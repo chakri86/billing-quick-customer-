@@ -1089,11 +1089,27 @@ private fun CartPane(viewModel: BillingViewModel, modifier: Modifier = Modifier)
     val settings by viewModel.settings.collectAsState()
     val role = viewModel.currentUser?.role ?: UserRole.EMPLOYEE
     var checkoutDialog by remember { mutableStateOf(false) }
+    var holdDialog by remember { mutableStateOf(false) }
+    var heldDialog by remember { mutableStateOf(false) }
+    var holdLabel by remember { mutableStateOf("") }
+    val heldOrders by viewModel.heldOrders.collectAsState()
+    val heldCount = heldOrders.count { it.status == "HELD" &&
+        (role != UserRole.EMPLOYEE || it.cashierId == viewModel.currentUser?.id) }
     Column(modifier.padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Current bill", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            if (lines.isNotEmpty()) IconButton(onClick = viewModel::clearCart) { Icon(Icons.Default.DeleteSweep, "Clear cart") }
+            if (lines.isNotEmpty() && viewModel.resumedOrder == null) IconButton(enabled = !viewModel.isSaving, onClick = viewModel::clearCart) { Icon(Icons.Default.DeleteSweep, "Clear cart") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(enabled = lines.isNotEmpty() && !viewModel.isSaving, onClick = {
+                holdLabel = viewModel.resumedOrder?.label.orEmpty()
+                holdDialog = true
+            }) { Text("Hold bill") }
+            TextButton(onClick = { heldDialog = true }) { Text("Held orders ($heldCount)") }
+        }
+        viewModel.resumedOrder?.let {
+            Text("Resumed: ${it.label.ifBlank { it.id.take(8) }}", style = MaterialTheme.typography.bodySmall)
         }
         Divider()
         if (lines.isEmpty()) {
@@ -1122,6 +1138,22 @@ private fun CartPane(viewModel: BillingViewModel, modifier: Modifier = Modifier)
             modifier = Modifier.fillMaxWidth().height(56.dp)
         ) { Text(if (viewModel.isSaving) "Saving…" else "Proceed to payment") }
     }
+    if (heldDialog) HeldOrdersDialog(viewModel) { heldDialog = false }
+    if (holdDialog) AlertDialog(
+        onDismissRequest = { holdDialog = false },
+        title = { Text("Hold this bill") },
+        text = {
+            OutlinedTextField(value = holdLabel, onValueChange = { holdLabel = it.take(80) },
+                label = { Text("Customer / table (optional)") }, singleLine = true)
+        },
+        confirmButton = {
+            TextButton(enabled = !viewModel.isSaving, onClick = {
+                viewModel.holdCart(holdLabel)
+                holdDialog = false
+            }) { Text("Save and start next bill") }
+        },
+        dismissButton = { TextButton(onClick = { holdDialog = false }) { Text("Back") } }
+    )
     if (checkoutDialog) CheckoutDialog(
         totalPaise = totalPaise,
         role = role,

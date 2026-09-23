@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.Flow
 import com.quickcustomer.billing.sync.StoreSnapshot
 
 class BillingRepository(private val db: AppDatabase) {
+    val heldOrders = db.heldOrderDao().observeAll()
     val products: Flow<List<ProductEntity>> = db.productDao().observeAll()
     val categories: Flow<List<CategoryEntity>> = db.categoryDao().observeAll()
     val users: Flow<List<UserEntity>> = db.userDao().observeAll()
@@ -47,12 +48,15 @@ class BillingRepository(private val db: AppDatabase) {
             expenses = sync.expenses(),
             inventoryItems = sync.inventoryItems(),
             stockTransactions = sync.stockTransactions(),
-            recipeIngredients = sync.recipeIngredients()
+            recipeIngredients = sync.recipeIngredients(),
+            heldOrders = db.heldOrderDao().all()
         )
     }
 
     suspend fun importStoreSnapshot(snapshot: StoreSnapshot) = db.withTransaction {
         val sync = db.syncDao()
+        db.heldOrderDao().deleteAll()
+        db.heldOrderDao().saveAll(snapshot.heldOrders)
         sync.upsertUsers(snapshot.users)
         sync.upsertCategories(snapshot.categories)
         sync.upsertProducts(snapshot.products)
@@ -174,6 +178,41 @@ class BillingRepository(private val db: AppDatabase) {
     suspend fun billDetails(sale: SaleEntity, settings: ShopSettingsEntity): BillDetails =
         BillDetails(sale, db.saleDao().itemsForSale(sale.id), settings)
 
+    private fun requireHeldAccess(order: HeldOrder, actor: UserEntity) {
+        require(order.status == "HELD") { "Order is no longer on hold." }
+        require(actor.role != UserRole.EMPLOYEE || actor.id == order.cashierId) {
+            "Employees can manage only their own held orders."
+        }
+    }
+
+    suspend fun holdOrder(id: String?, label: String, actor: UserEntity, lines: List<CartLine>): HeldOrder = db.withTransaction {
+        val old = id?.let { requireNotNull(db.heldOrderDao().get(it)) { "Held order no longer exists." } }
+        if (old != null) requireHeldAccess(old, actor)
+        val now = System.currentTimeMillis()
+        val order = HeldOrder(
+            id = old?.id ?: UUID.randomUUID().toString(),
+            label = label.trim().take(80), cashierId = old?.cashierId ?: actor.id,
+            cashierName = old?.cashierName ?: actor.displayName,
+            createdAt = old?.createdAt ?: now, updatedAt = now,
+            linesJson = HeldOrder.encode(lines)
+        )
+        db.heldOrderDao().save(order)
+        order
+    }
+
+    suspend fun resumeOrder(id: String, actor: UserEntity): HeldOrder = db.withTransaction {
+        requireNotNull(db.heldOrderDao().get(id)) { "Held order no longer exists." }.also {
+            requireHeldAccess(it, actor)
+        }
+    }
+
+    suspend fun cancelHeldOrder(id: String, actor: UserEntity, reason: String) = db.withTransaction {
+        val order = resumeOrder(id, actor)
+        require(reason.trim().length >= 3) { "Enter a cancellation reason (at least 3 characters)." }
+        db.heldOrderDao().save(order.copy(status = "CANCELLED", updatedAt = System.currentTimeMillis(),
+            cancellationReason = reason.trim(), cancelledByName = actor.displayName))
+    }
+
     suspend fun completeSale(
         cashier: UserEntity,
         lines: List<CartLine>,
@@ -183,9 +222,15 @@ class BillingRepository(private val db: AppDatabase) {
         settings: ShopSettingsEntity,
         businessId: String = "business-demo",
         shopId: String = "shop-main",
-        deviceId: String = "local-device"
+        deviceId: String = "local-device",
+        heldOrderId: String? = null
     ): Receipt = db.withTransaction {
         require(lines.isNotEmpty()) { "A bill must contain at least one item." }
+        if (heldOrderId != null) {
+            val held = requireNotNull(db.heldOrderDao().get(heldOrderId)) { "Held order no longer exists." }
+            requireHeldAccess(held, cashier)
+            require(db.heldOrderDao().consume(heldOrderId) == 1) { "Order is no longer on hold." }
+        }
         val now = System.currentTimeMillis()
         val saleId = UUID.randomUUID().toString()
         val subtotal = lines.sumOf { it.lineTotalPaise }

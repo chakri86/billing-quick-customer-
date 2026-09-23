@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.8 — Hold and resume bills
+
+- Save multiple unpaid orders with labels and frozen product/price/quantity snapshots.
+- Resume after other customers or an app restart; require an empty cart to avoid replacing another order.
+- Cancel held orders with a reason and retain them under Saved orders → Cancelled.
+- Held and cancelled unpaid orders never count as sales or consume inventory.
+- Consume a held order atomically with payment; failed payments retain the held order.
+- Database migration 8→9 preserves existing data; Drive snapshot format 2 includes held orders. Update both devices before synchronization.
+
+
 ## 0.9.7 — Compact voice billing toolbar
 
 - Replace the tall voice banner with one row: microphone button, language selector and Voice options icon.

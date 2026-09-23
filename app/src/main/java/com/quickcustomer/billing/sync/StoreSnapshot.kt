@@ -27,13 +27,14 @@ data class StoreSnapshot(
     val expenses: List<ExpenseEntity>,
     val inventoryItems: List<InventoryItemEntity>,
     val stockTransactions: List<StockTransactionEntity>,
-    val recipeIngredients: List<RecipeIngredientEntity>
+    val recipeIngredients: List<RecipeIngredientEntity>,
+    val heldOrders: List<com.quickcustomer.billing.data.HeldOrder> = emptyList()
 ) {
     init {
         require(formatVersion in 1..CURRENT_FORMAT) { "Unsupported store snapshot format." }
     }
 
     companion object {
-        const val CURRENT_FORMAT = 1
+        const val CURRENT_FORMAT = 2
     }
 }

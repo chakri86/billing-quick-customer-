@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.quickcustomer.billing.QuickCustomerApplication
+import com.quickcustomer.billing.data.HeldOrder
 import com.quickcustomer.billing.data.BillDetails
 import com.quickcustomer.billing.data.BillingCategories
 import com.quickcustomer.billing.data.CartLine
@@ -65,6 +66,13 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     private val printerManager = BluetoothPrinterManager(application.applicationContext)
     private var googleAccessToken: String? = null
     private var scheduledSyncJob: Job? = null
+
+    val heldOrders = repository.heldOrders.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+    var resumedOrder by mutableStateOf<HeldOrder?>(null)
+        private set
+    private val heldProducts = mutableStateMapOf<String, ProductEntity>()
 
     val products: StateFlow<List<ProductEntity>> = repository.products.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
@@ -292,6 +300,9 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     fun clearLoginError() { loginError = null }
 
     fun logout() {
+        if (isSaving) return
+        resumedOrder = null
+        heldProducts.clear()
         currentUser = null
         currentSection = AppSection.BILLING
         quantities.clear()
@@ -319,7 +330,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
     fun selectCategory(category: String) { selectedCategory = category }
 
-    fun cartLines(catalog: List<ProductEntity> = products.value): List<CartLine> = (catalog + miscProducts.values).mapNotNull { product ->
+    fun cartLines(catalog: List<ProductEntity> = products.value): List<CartLine> = (catalog.associateBy { it.id } + miscProducts + heldProducts).values.mapNotNull { product ->
         quantities[product.id]?.takeIf { it > 0 }?.let { CartLine(product, it) }
     }
 
@@ -327,10 +338,12 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     fun cartTotalPaise(): Long = cartLines().sumOf { it.lineTotalPaise }
 
     fun add(product: ProductEntity) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
         quantities[product.id] = (quantities[product.id] ?: 0) + 1
     }
 
     fun addVoiceItems(items: List<VoiceCartItem>) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
         if (isMonitorMode) {
             operationError = "This is a read-only monitoring device."
             return
@@ -345,6 +358,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun decrement(product: ProductEntity) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
         val next = (quantities[product.id] ?: 0) - 1
         if (next <= 0) {
             quantities.remove(product.id)
@@ -353,6 +367,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun addMisc(pricePaise: Long, description: String) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
         if (pricePaise <= 0) {
             operationError = "Enter a Misc price greater than zero."
             return
@@ -369,9 +384,70 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         quantities[id] = 1
     }
 
-    fun clearCart() {
+    private fun resetCart() {
         quantities.clear()
         miscProducts.clear()
+        heldProducts.clear()
+        resumedOrder = null
+    }
+
+    fun clearCart() {
+        if (isSaving) return
+        if (resumedOrder != null) {
+            operationError = "Save this order with Hold bill, or cancel it from Held orders."
+            return
+        }
+        resetCart()
+    }
+
+    fun holdCart(label: String) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
+        val actor = currentUser ?: return
+        val lines = cartLines()
+        if (lines.isEmpty()) return
+        val id = resumedOrder?.id
+        isSaving = true
+        viewModelScope.launch {
+            runCatching { repository.holdOrder(id, label, actor, lines) }
+                .onSuccess { resetCart(); scheduleDriveUpload() }
+                .onFailure { operationError = it.message ?: "Could not hold this bill." }
+            isSaving = false
+        }
+    }
+
+    fun resumeHeldOrder(order: HeldOrder) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
+        if (cartCount() > 0 || resumedOrder != null) {
+            operationError = "Hold or finish the current bill before resuming another order."
+            return
+        }
+        val actor = currentUser ?: return
+        isSaving = true
+        viewModelScope.launch {
+            runCatching {
+                val saved = repository.resumeOrder(order.id, actor)
+                val lines = saved.lines()
+                resetCart()
+                lines.forEach { heldProducts[it.product.id] = it.product; quantities[it.product.id] = it.quantity }
+                resumedOrder = saved
+            }.onFailure { operationError = it.message ?: "Could not resume this order." }
+            isSaving = false
+        }
+    }
+
+    fun cancelHeldOrder(order: HeldOrder, reason: String) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
+        val actor = currentUser ?: return
+        isSaving = true
+        viewModelScope.launch {
+            runCatching { repository.cancelHeldOrder(order.id, actor, reason) }
+                .onSuccess {
+                    if (resumedOrder?.id == order.id) resetCart()
+                    scheduleDriveUpload()
+                }
+                .onFailure { operationError = it.message ?: "Could not cancel this order." }
+            isSaving = false
+        }
     }
 
     fun checkout(
@@ -385,6 +461,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         }
         val user = currentUser ?: return
         val lines = cartLines()
+        val heldOrderId = resumedOrder?.id
         if (lines.isEmpty() || isSaving) return
         isSaving = true
         operationError = null
@@ -400,12 +477,12 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
                     settings = settings.value,
                     businessId = driveSyncManager.preferences.storeId.ifBlank { "business-demo" },
                     shopId = "shop-main",
-                    deviceId = driveSyncManager.preferences.deviceId
+                    deviceId = driveSyncManager.preferences.deviceId,
+                    heldOrderId = heldOrderId
                 )
             }
                 .onSuccess {
-                    quantities.clear()
-                    miscProducts.clear()
+                    resetCart()
                     lastReceipt = it
                     val printerSettings = settings.value
                     if (printerSettings.printerEnabled && printerSettings.printerAutoPrint) {

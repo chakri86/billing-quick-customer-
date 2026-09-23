@@ -312,6 +312,7 @@ interface InventoryDao {
 
 @Database(
     entities = [
+        HeldOrder::class,
         UserEntity::class,
         ProductEntity::class,
         CategoryEntity::class,
@@ -324,11 +325,12 @@ interface InventoryDao {
         StockTransactionEntity::class,
         RecipeIngredientEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 @TypeConverters(DbConverters::class)
 abstract class AppDatabase : RoomDatabase() {
+    abstract fun heldOrderDao(): HeldOrderDao
     abstract fun userDao(): UserDao
     abstract fun productDao(): ProductDao
     abstract fun categoryDao(): CategoryDao
@@ -354,10 +356,23 @@ abstract class AppDatabase : RoomDatabase() {
                 MIGRATION_4_5,
                 MIGRATION_5_6,
                 MIGRATION_6_7,
-                MIGRATION_7_8
+                MIGRATION_7_8,
+                MIGRATION_8_9
             )
                 .build()
                 .also { instance = it }
+        }
+
+        internal val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS held_orders (
+                    id TEXT NOT NULL PRIMARY KEY, label TEXT NOT NULL,
+                    cashierId TEXT NOT NULL, cashierName TEXT NOT NULL,
+                    createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL,
+                    linesJson TEXT NOT NULL, status TEXT NOT NULL,
+                    cancellationReason TEXT NOT NULL, cancelledByName TEXT NOT NULL
+                )""")
+            }
         }
 
         internal val MIGRATION_1_2 = object : Migration(1, 2) {
