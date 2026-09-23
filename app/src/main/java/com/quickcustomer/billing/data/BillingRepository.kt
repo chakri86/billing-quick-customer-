@@ -11,8 +11,10 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 import com.quickcustomer.billing.domain.BillingCalculator
 import kotlinx.coroutines.flow.Flow
+import com.quickcustomer.billing.sync.StoreSnapshot
 
 class BillingRepository(private val db: AppDatabase) {
+    val heldOrders = db.heldOrderDao().observeAll()
     val products: Flow<List<ProductEntity>> = db.productDao().observeAll()
     val categories: Flow<List<CategoryEntity>> = db.categoryDao().observeAll()
     val users: Flow<List<UserEntity>> = db.userDao().observeAll()
@@ -32,6 +34,53 @@ class BillingRepository(private val db: AppDatabase) {
 
     fun productProfitInRange(startInclusive: Long, endExclusive: Long): Flow<List<ProductProfitSummary>> =
         db.saleDao().observeProductProfitInRange(startInclusive, endExclusive)
+
+    suspend fun exportStoreSnapshot(): StoreSnapshot = db.withTransaction {
+        val sync = db.syncDao()
+        StoreSnapshot(
+            users = sync.users(),
+            products = sync.products(),
+            categories = sync.categories(),
+            sales = sync.sales(),
+            saleItems = sync.saleItems(),
+            settings = sync.settings() ?: ShopSettingsEntity(),
+            auditLogs = sync.auditLogs(),
+            expenses = sync.expenses(),
+            inventoryItems = sync.inventoryItems(),
+            stockTransactions = sync.stockTransactions(),
+            recipeIngredients = sync.recipeIngredients(),
+            heldOrders = db.heldOrderDao().all()
+        )
+    }
+
+    suspend fun importStoreSnapshot(snapshot: StoreSnapshot) = db.withTransaction {
+        val sync = db.syncDao()
+        db.heldOrderDao().deleteAll()
+        db.heldOrderDao().saveAll(snapshot.heldOrders)
+        sync.upsertUsers(snapshot.users)
+        sync.upsertCategories(snapshot.categories)
+        sync.upsertProducts(snapshot.products)
+        sync.upsertSettings(snapshot.settings)
+        sync.upsertSales(snapshot.sales)
+        sync.upsertSaleItems(snapshot.saleItems)
+        sync.upsertExpenses(snapshot.expenses)
+        sync.upsertInventoryItems(snapshot.inventoryItems)
+        sync.upsertStockTransactions(snapshot.stockTransactions)
+        sync.upsertRecipeIngredients(snapshot.recipeIngredients)
+        sync.upsertAuditLogs(snapshot.auditLogs)
+    }
+
+    suspend fun markStoreSnapshotSynced() = db.withTransaction {
+        val sync = db.syncDao()
+        sync.markProductsSynced()
+        sync.markCategoriesSynced()
+        sync.markSalesSynced()
+        sync.markAuditLogsSynced()
+        sync.markExpensesSynced()
+        sync.markInventoryItemsSynced()
+        sync.markStockTransactionsSynced()
+        sync.markRecipeIngredientsSynced()
+    }
 
     suspend fun ensureSeeded() = db.withTransaction {
         if (db.productDao().count() == 0) {
@@ -129,15 +178,58 @@ class BillingRepository(private val db: AppDatabase) {
     suspend fun billDetails(sale: SaleEntity, settings: ShopSettingsEntity): BillDetails =
         BillDetails(sale, db.saleDao().itemsForSale(sale.id), settings)
 
+    private fun requireHeldAccess(order: HeldOrder, actor: UserEntity) {
+        require(order.status == "HELD") { "Order is no longer on hold." }
+        require(actor.role != UserRole.EMPLOYEE || actor.id == order.cashierId) {
+            "Employees can manage only their own held orders."
+        }
+    }
+
+    suspend fun holdOrder(id: String?, label: String, actor: UserEntity, lines: List<CartLine>): HeldOrder = db.withTransaction {
+        val old = id?.let { requireNotNull(db.heldOrderDao().get(it)) { "Held order no longer exists." } }
+        if (old != null) requireHeldAccess(old, actor)
+        val now = System.currentTimeMillis()
+        val order = HeldOrder(
+            id = old?.id ?: UUID.randomUUID().toString(),
+            label = label.trim().take(80), cashierId = old?.cashierId ?: actor.id,
+            cashierName = old?.cashierName ?: actor.displayName,
+            createdAt = old?.createdAt ?: now, updatedAt = now,
+            linesJson = HeldOrder.encode(lines)
+        )
+        db.heldOrderDao().save(order)
+        order
+    }
+
+    suspend fun resumeOrder(id: String, actor: UserEntity): HeldOrder = db.withTransaction {
+        requireNotNull(db.heldOrderDao().get(id)) { "Held order no longer exists." }.also {
+            requireHeldAccess(it, actor)
+        }
+    }
+
+    suspend fun cancelHeldOrder(id: String, actor: UserEntity, reason: String) = db.withTransaction {
+        val order = resumeOrder(id, actor)
+        db.heldOrderDao().save(order.copy(status = "CANCELLED", updatedAt = System.currentTimeMillis(),
+            cancellationReason = reason.trim(), cancelledByName = actor.displayName))
+    }
+
     suspend fun completeSale(
         cashier: UserEntity,
         lines: List<CartLine>,
         paymentMethod: PaymentMethod,
         requestedDiscountPaise: Long,
         cashReceivedPaise: Long?,
-        settings: ShopSettingsEntity
+        settings: ShopSettingsEntity,
+        businessId: String = "business-demo",
+        shopId: String = "shop-main",
+        deviceId: String = "local-device",
+        heldOrderId: String? = null
     ): Receipt = db.withTransaction {
         require(lines.isNotEmpty()) { "A bill must contain at least one item." }
+        if (heldOrderId != null) {
+            val held = requireNotNull(db.heldOrderDao().get(heldOrderId)) { "Held order no longer exists." }
+            requireHeldAccess(held, cashier)
+            require(db.heldOrderDao().consume(heldOrderId) == 1) { "Order is no longer on hold." }
+        }
         val now = System.currentTimeMillis()
         val saleId = UUID.randomUUID().toString()
         val subtotal = lines.sumOf { it.lineTotalPaise }
@@ -157,6 +249,9 @@ class BillingRepository(private val db: AppDatabase) {
         val invoiceNumber = buildInvoiceNumber(now)
         val sale = SaleEntity(
             id = saleId,
+            businessId = businessId,
+            shopId = shopId,
+            deviceId = deviceId,
             invoiceNumber = invoiceNumber,
             createdAt = now,
             cashierId = cashier.id,
@@ -214,7 +309,7 @@ class BillingRepository(private val db: AppDatabase) {
 
     suspend fun cancelSale(sale: SaleEntity, actor: UserEntity, reason: String) = db.withTransaction {
         require(actor.role != UserRole.EMPLOYEE) { "Admin or Super User access is required." }
-        require(reason.trim().length >= 3) { "Enter a cancellation reason." }
+        require(reason.isNotBlank()) { "Enter a cancellation reason." }
         val changed = db.saleDao().cancel(
             saleId = sale.id,
             cancelledAt = System.currentTimeMillis(),

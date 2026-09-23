@@ -1,5 +1,90 @@
 # Changelog
 
+## 0.9.9 — Cancellation reason adjustment
+
+- Held-order cancellation reasons are optional; a single character is accepted.
+- Completed-bill cancellation still requires a reason, but accepts a single character.
+
+
+## 0.9.8 — Hold and resume bills
+
+- Save multiple unpaid orders with labels and frozen product/price/quantity snapshots.
+- Resume after other customers or an app restart; require an empty cart to avoid replacing another order.
+- Cancel held orders with a reason and retain them under Saved orders → Cancelled.
+- Held and cancelled unpaid orders never count as sales or consume inventory.
+- Consume a held order atomically with payment; failed payments retain the held order.
+- Database migration 8→9 preserves existing data; Drive snapshot format 2 includes held orders. Update both devices before synchronization.
+
+
+## 0.9.7 — Compact voice billing toolbar
+
+- Replace the tall voice banner with one row: microphone button, language selector and Voice options icon.
+- Move command examples and automatic-switching help into a scrollable popup.
+- Show automatic switching disabled on Android below 14, with the device Android version and manual-language guidance.
+- Retain the API 34 speech-switching gate, saved language preferences, voice choices and cart refresh fix.
+
+## 0.9.6 — Observe catalog loading in the cart
+
+- Subscribe the cart's own Compose scope to product updates so a cold-start empty catalog cannot leave tap/voice additions invisible.
+- Calculate the displayed and checkout totals from the same visible cart lines.
+- Preserve voice choices, prices, data and signing identity; no database migration.
+
+## 0.9.5 — Tap to resolve voice product suggestions
+
+- Offer every matching active product for duplicate names, with category and current price.
+- Put the selected category first without silently selecting a product.
+- Preserve clear order items and spoken/default quantities; require every choice before Add to cart.
+- Offer up to five close spelling suggestions when no name matches; even a single suggestion requires selection.
+- Retain quantity-ambiguity rejection and enforce the 99-per-product limit after choices are merged.
+- Add duplicate-name, selection, inactive-product, suggestion and quantity regression tests. No database migration.
+
+## 0.9.4 — Flexible voice quantities and targeted name corrections
+
+- Default product-only orders to one, and accept quantities before or after product names.
+- Parse multiple items with explicit ambiguity checks and require the whole phrase to match.
+- Correct the reported brew/BRU and dumpty/Dum Tea transcriptions against active catalog names.
+- Keep exact names ahead of aliases and reject ambiguous partial product matches.
+- Update voice examples and extend regression tests. No database or speech-language configuration changes.
+
+## 0.9.3 — Voice entry for product forms
+
+- Added field microphones for product name, category and whole-rupee price in Add/Edit product.
+- Added a Use value review step; Save remains an explicit action.
+- Reused per-device English/Telugu/Hindi speech preferences and the owner-controlled voice switch.
+- Added strict spoken-price parsing and rejection tests for ambiguous/invalid prices.
+- Preserved product-management permissions and existing database format.
+
+## 0.9.2 — English, Telugu, and Hindi voice input
+
+- Preserve Telugu/Hindi characters and normalize native digits.
+- Parse English, Telugu, Hindi and mixed quantity-first orders, including common transliterated quantities and tea/coffee/snack aliases.
+- Add a device-local speech-language selector in Settings and Billing.
+- Offer optional Android 14+ automatic switching; recognizer support and downloaded models are required.
+- Reject invalid quantities instead of silently truncating them.
+- Keep confirmation mandatory; no Room migration or Drive format changes.
+
+## 0.9.1 — Optional voice-assisted billing
+
+- Added a Super User setting to enable or disable voice billing.
+- Added tap-to-speak product and quantity entry on the Billing screen.
+- Added spoken number support from one through twenty and numeric quantities through 99.
+- Added deterministic category defaults for generic requests such as tea and coffee.
+- Added a mandatory confirmation dialog showing the exact interpreted products and quantities.
+- Kept payments, discounts, cancellations, and administration outside voice control.
+- Added microphone privacy disclosure, runtime permission handling, and speech-service fallback messaging.
+- Added parser unit tests and a Room 7-to-8 migration that preserves existing store data.
+
+## 0.9.0 — Store Gmail and Google Drive synchronization
+
+- Added first-install store Gmail authorization before application user setup.
+- Added private Google Drive app-data storage for the complete store snapshot.
+- Added automatic new-store detection and Super User initialization.
+- Added same-account restore for additional phones and tablets.
+- Added a single primary billing device and read-only monitoring-device mode.
+- Added manual synchronization and a two-minute foreground refresh for monitors.
+- Added local-first writes, pending-state tracking, account matching, and snapshot format checks.
+- Added Google Cloud OAuth configuration, privacy, and Data Safety documentation.
+
 ## 0.8.1 — Category-filtered product rankings
 
 - Made All the default Top products result size.

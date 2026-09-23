@@ -2,7 +2,19 @@
 
 This repository contains the runnable offline-first Quick Customer billing application.
 
-## Included in version 0.8.1
+## Included in version 0.9.9
+
+Billing uses a compact voice toolbar with a microphone, language dropdown and Voice options button. Examples and automatic-switching help are in the popup. On Android below 14 the automatic-switching checkbox is disabled and explains the version requirement; manual English/Telugu/Hindi selection remains available. Android 14+ only permits requesting automatic switching: actual support still depends on the speech service and downloaded models. See [Android RecognizerIntent](https://developer.android.com/reference/android/speech/RecognizerIntent#EXTRA_ENABLE_LANGUAGE_SWITCH).
+
+Device checks: verify the compact row in tablet landscape/portrait and on a phone; open Voice options; check the disabled explanation on Android below 14 and the toggle on API 34+; change language and reopen the app to check persistence; confirm voice, tap-to-cart and product suggestions still work.
+
+The cart now observes catalog loading directly, fixing a startup timing issue where tap and voice additions could remain invisible. Displayed totals and checkout totals use the same cart lines. Device regression check: force-close and reopen, log in, tap a product, confirm a voice item, and verify quantity, total and Proceed update immediately on tablet and phone. No data reset or migration is needed.
+
+Voice review now shows tappable choices for duplicate product names, including category and current price. Matches in the selected category appear first, but none is selected automatically. Every unclear item must be selected before Add to cart becomes available. Clear items and quantities are retained. Product-only orders still default to one; prefix/suffix quantities remain supported.
+
+When no catalog name matches, up to five close spelling suggestions may appear and always require an explicit tap. This is catalog matching, not a new speech engine, and cannot fix every transcription. Quantity ambiguity still asks for a clearer order. No database migration or Google authorization changes are required.
+
+Device checks for 0.9.5: say “Rose milk”, “two rose milk”, and “rose milk two”; verify all active duplicates show their current category/price, selected-category matches appear first, Add to cart stays disabled until selection, and the chosen product/quantity enters the cart only after confirmation. Test “coffee and rose milk”, repeated Rose Milk, cancel/retry, and a near spelling such as “rose mil”. Check long lists scroll on phone and tablet. Automated tests do not replace device microphone/UI testing.
 
 - Adaptive Jetpack Compose interface for Android phones and tablets
 - Android 8/API 26 through Android 16/API 36 support
@@ -50,8 +62,29 @@ This repository contains the runnable offline-first Quick Customer billing appli
 - Complete Quick Customer application identity using package ID `com.quickcustomer.billing`
 - In-app privacy-policy access and permanent local-data deletion
 - Play Store listing, Data Safety worksheet, reviewer instructions, release checklist, and signed-AAB workflow
+- First-install connection to a dedicated store Gmail account
+- Private Google Drive `appDataFolder` backup and whole-store synchronization
+- Automatic new-store detection and first Super User setup after Drive connection
+- Existing-store restore when the same store Gmail is connected on another device
+- One primary billing device with additional read-only monitoring devices
+- Manual refresh plus two-minute foreground refresh on monitoring devices
+- Owner-controlled, tap-to-speak voice billing for product names and quantities
+- Review-and-confirm dialog before recognized items are added to the cart
+- No voice control for payments, discounts, cancellations, or administration
 
-Cloud API synchronization is scheduled after the local billing and printer workflows are accepted. Bills are already marked with sync state, business ID, shop ID, and device ID so cloud sync does not require a database redesign.
+Version 0.9.3 adds optional voice-assisted item entry while retaining the version 0.9.0 Google Drive synchronization foundation. The primary device continues to save every operation locally first and uploads a store snapshot after changes. Monitoring devices download that snapshot and cannot create or modify business records.
+
+## Configure voice billing
+
+1. Sign in as the Super User.
+2. Open **Settings → Voice billing**.
+3. Enable the switch and save settings.
+4. Return to Billing and tap **Voice billing**.
+5. Allow microphone access when Android asks.
+6. Say an order such as **“two tea two coffee.”**
+7. Review the exact products and quantities, then tap **Add to cart**.
+
+The microphone is hidden while the setting is disabled. Quick Customer does not store recordings; Android's selected speech-recognition service processes the audio. Touch billing remains available on devices without speech recognition.
 
 ## Open in Android Studio
 
@@ -65,9 +98,11 @@ Cloud API synchronization is scheduled after the local billing and printer workf
 
 The first build downloads Android and Kotlin dependencies and can take several minutes.
 
-## First-run owner setup
+## First-run store and owner setup
 
-A fresh installation asks the shop owner to create the first Super User username and password. No default credentials, password hashes, or password salts are published in this repository. The Super User can then create Admin and Employee accounts from the Users screen. Existing installations retain their current users and local bills.
+A fresh installation first asks the owner to connect the dedicated store Gmail and authorize Quick Customer's private Drive application-data folder. If no existing store snapshot is found, the app asks the owner to create the first Super User. If a snapshot exists, the app restores it and asks for an existing Quick Customer user login. No default credentials, password hashes, or password salts are published in this repository.
+
+Google authorization requires one manual Cloud Console setup before Drive testing. Follow [docs/GOOGLE_DRIVE_SETUP.md](docs/GOOGLE_DRIVE_SETUP.md). Device-only mode remains available when Drive is not required.
 
 ## Recommended emulator matrix
 
@@ -130,3 +165,57 @@ For a signed bundle, create `keystore.properties` from `keystore.properties.exam
 - Confirmation that `Samosa (2 pcs) ₹15` means two pieces for ₹15
 - Whether menu prices already include applicable taxes
 - Final spelling for Sonti/Sonthi and Sukku wording
+
+## Multilingual voice billing (0.9.3)
+
+Enable Voice billing in Settings. Select English, Telugu or Hindi on that device; this does not change the shop or phone language. Say a product alone for one, or place its quantity before or after the name; review the exact matched items. Examples: `two tea two coffee`, `rendu tea oka coffee`, `రెండు టీ ఒక కాఫీ`, `do chai ek coffee`, `दो चाय एक कॉफी`, `two tea రెండు కాఫీ`.
+
+The parser supports common quantity words 1–20 in these languages and numeric digits 1–99, including Telugu and Hindi digits. Common cafe aliases are built in; arbitrary translations of every custom product are not provided. Use the catalog name for other products. Generic tea/coffee still shows the first active category product for confirmation.
+
+Automatic language switching is an optional Android 14+ request, off by default; it depends on the installed recognition service and downloaded English/Telugu/Hindi models. Older devices and unsupported services should use a selected primary language. Mixed speech accuracy needs physical-device testing. Quick Customer does not record audio.
+
+Device validation: test each example with the corresponding language; test mixed mode if offered; verify the heard text and exact quantities; cancel and confirm separately; restart and verify the language preference; disable voice and verify the microphone disappears. Test in actual shop noise.
+
+Android API reference: https://developer.android.com/reference/android/speech/RecognizerIntent#EXTRA_ENABLE_LANGUAGE_SWITCH
+
+## Voice entry for products (0.9.3)
+
+Enable Settings → Voice input (previously Voice billing). In Products → Add or Edit product, use the microphone beside Product name, Category, or Price. Dictate one field at a time; choose Use value after reviewing the recognized text, then explicitly Save the completed form. Existing product-management permissions still apply. No product is saved by speech alone. Names retain the recognized language; exact existing category names are reused case-insensitively.
+
+Prices use the existing whole-rupee form. Native digits and common English/Telugu/Hindi number words are accepted; unclear prices, decimals, negative amounts and overflow are rejected. Type unsupported number phrases manually. The same per-device language and optional automatic-switching preferences apply.
+
+Device tests: create a product by dictating all three fields; cancel a proposed value and check the old field is retained; test price “twenty”, “ఇరవై”, “बीस” and “20”; check Save creates exactly one product; edit a product and confirm no changes are stored until Save; deny microphone permission; disable voice and verify microphones disappear; confirm employees without product-management permission cannot access product editing.
+
+## Flexible voice orders (0.9.4)
+
+`coffee` means one coffee; `two tea` and `tea two` both mean two teas. The same rule applies to supported Telugu/Hindi quantities, native digits and product names. Multiple products can be spoken together. Separate ambiguous phrases with “and”: `tea two and coffee one` is explicit, whereas `tea two coffee` could attach “two” to either product and asks you to retry. All words must be accounted for; unknown words prevent adding a partial order.
+
+Targeted recognition corrections map `brew` to `BRU` and `dumpty` to `Dum Tea` when those active products match. Existing exact catalog names take precedence. Ambiguous partial names are rejected; generic category defaults such as tea/coffee retain their existing first-active-product behavior and always show the actual product for review. No arbitrary fuzzy substitution, product renaming, or changes to product-form dictation are performed.
+
+Device validation: say coffee; two tea; tea two; tea two coffee three; two tea and coffee; brew tea; two brew tea; dumpty; dumpty two. Confirm the actual product and quantity shown. Also try an unknown product and an ambiguous partial name; neither should silently add items.
+
+
+### Holding an unpaid order (v0.9.9)
+
+On Billing, tap **Hold bill**, optionally enter a customer/table label, then tap
+**Save and start next bill**. The cart clears only after the order is saved locally.
+Serve the next customer normally. Open **Held orders**, then **Resume** when the
+first customer returns. Hold or finish any current cart before resuming another.
+
+Saved orders retain their product names, categories, prices, quantities and Misc
+items across restarts. After editing a resumed order, tap **Hold bill** again to
+save those edits before leaving it. Payment completes it once and removes its hold.
+To abandon it, use **Cancel order**, optionally enter a reason, and find it under the
+**Cancelled** tab in Saved orders. These unpaid cancellations are separate from
+cancellations of completed sales; neither held orders nor cancelled unpaid orders
+count as sales or deduct stock. Employees manage their own held orders; Admin and
+Super User can manage all. The monitoring device remains read-only.
+
+Drive snapshots now include held orders (format 2). Update both primary and
+monitor devices to v0.9.9 before synchronizing. Local holding also works offline.
+
+Tablet acceptance check: hold a multi-item order including Misc; complete a
+second customer's order; restart the app; resume the first order and verify its
+prices and quantities; complete payment once. Also cancel a separate held order
+and check its reason/items remain in Saved orders → Cancelled without increasing
+sales or changing inventory.

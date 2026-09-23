@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.quickcustomer.billing.QuickCustomerApplication
+import com.quickcustomer.billing.data.HeldOrder
 import com.quickcustomer.billing.data.BillDetails
 import com.quickcustomer.billing.data.BillingCategories
 import com.quickcustomer.billing.data.CartLine
@@ -30,14 +31,21 @@ import com.quickcustomer.billing.data.UserEntity
 import com.quickcustomer.billing.data.UserRole
 import com.quickcustomer.billing.domain.AccessPolicy
 import com.quickcustomer.billing.domain.AppPermission
+import com.quickcustomer.billing.domain.VoiceCartItem
 import com.quickcustomer.billing.printing.BluetoothPrinterManager
 import com.quickcustomer.billing.printing.PairedBluetoothPrinter
 import com.quickcustomer.billing.printing.PrintableReceipt
+import com.quickcustomer.billing.sync.DeviceMode
+import com.quickcustomer.billing.sync.DriveConnectOutcome
+import com.quickcustomer.billing.sync.DriveSetupStage
+import com.quickcustomer.billing.sync.DriveUiState
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -52,8 +60,19 @@ enum class AppSection(val label: String) {
 }
 
 class BillingViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = (application as QuickCustomerApplication).repository
+    private val quickCustomerApplication = application as QuickCustomerApplication
+    private val repository = quickCustomerApplication.repository
+    private val driveSyncManager = quickCustomerApplication.driveSyncManager
     private val printerManager = BluetoothPrinterManager(application.applicationContext)
+    private var googleAccessToken: String? = null
+    private var scheduledSyncJob: Job? = null
+
+    val heldOrders = repository.heldOrders.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+    var resumedOrder by mutableStateOf<HeldOrder?>(null)
+        private set
+    private val heldProducts = mutableStateMapOf<String, ProductEntity>()
 
     val products: StateFlow<List<ProductEntity>> = repository.products.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
@@ -106,6 +125,20 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         private set
     var authReady by mutableStateOf(false)
         private set
+    var driveUiState by mutableStateOf(
+        DriveUiState(
+            stage = DriveSetupStage.REQUIRED,
+            email = driveSyncManager.preferences.email,
+            deviceMode = driveSyncManager.preferences.mode,
+            lastSyncAt = driveSyncManager.preferences.lastSyncAt,
+            message = if (driveSyncManager.preferences.isLinked) {
+                "Reconnect ${driveSyncManager.preferences.email} to synchronize this device."
+            } else {
+                "Connect the dedicated store Gmail before creating application users."
+            }
+        )
+    )
+        private set
     var needsOwnerSetup by mutableStateOf(false)
         private set
     var loginError by mutableStateOf<String?>(null)
@@ -128,6 +161,11 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         private set
     var isPrinting by mutableStateOf(false)
         private set
+    var isSyncing by mutableStateOf(false)
+        private set
+
+    val shouldAutoReconnectDrive: Boolean get() = driveSyncManager.preferences.isLinked
+    val isMonitorMode: Boolean get() = driveUiState.deviceMode == DeviceMode.MONITOR
 
     private val quantities = mutableStateMapOf<String, Int>()
     private val miscProducts = mutableStateMapOf<String, ProductEntity>()
@@ -136,9 +174,98 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             runCatching { repository.ensureSeeded() }
                 .onFailure { operationError = it.message ?: "Could not initialize local data." }
-            needsOwnerSetup = runCatching { !repository.hasUsers() }.getOrDefault(false)
-            authReady = true
+            val hasUsers = runCatching { repository.hasUsers() }.getOrDefault(false)
+            needsOwnerSetup = !hasUsers
+            // After the first successful store link, never block existing users from
+            // opening their local data just because Google Drive is temporarily offline.
+            if (hasUsers && driveSyncManager.preferences.isLinked) authReady = true
         }
+    }
+
+    fun onDriveAuthorizationStarted() {
+        driveUiState = driveUiState.copy(
+            stage = if (authReady) driveUiState.stage else DriveSetupStage.AUTHORIZING,
+            message = "Waiting for Google Drive authorization…"
+        )
+    }
+
+    fun onDriveAuthorizationFailed(message: String) {
+        driveUiState = driveUiState.copy(
+            stage = if (authReady) driveUiState.stage else DriveSetupStage.ERROR,
+            message = message.ifBlank { "Google Drive authorization was not completed." }
+        )
+        if (authReady) operationError = driveUiState.message
+    }
+
+    fun connectGoogleDrive(accessToken: String) {
+        if (isSyncing) return
+        googleAccessToken = accessToken
+        isSyncing = true
+        val previousStage = driveUiState.stage
+        driveUiState = driveUiState.copy(
+            stage = if (authReady) driveUiState.stage else DriveSetupStage.CHECKING_DRIVE,
+            message = "Checking this Gmail for Quick Customer store data…"
+        )
+        viewModelScope.launch {
+            runCatching { driveSyncManager.connect(accessToken) }
+                .onSuccess { outcome ->
+                    needsOwnerSetup = !repository.hasUsers()
+                    authReady = true
+                    when (outcome) {
+                        is DriveConnectOutcome.EmptyDrive -> {
+                            driveUiState = DriveUiState(
+                                stage = DriveSetupStage.DRIVE_EMPTY,
+                                email = outcome.connection.email,
+                                deviceMode = outcome.connection.mode,
+                                message = if (needsOwnerSetup) {
+                                    "New store detected. Create the first Super User to finish setup."
+                                } else {
+                                    "Drive is empty. Sign in as Super User to upload this device as the primary store."
+                                }
+                            )
+                        }
+                        is DriveConnectOutcome.ExistingStore -> {
+                            driveUiState = DriveUiState(
+                                stage = DriveSetupStage.READY,
+                                email = outcome.connection.email,
+                                deviceMode = outcome.connection.mode,
+                                lastSyncAt = outcome.syncedAt,
+                                message = if (outcome.connection.mode == DeviceMode.PRIMARY) {
+                                    "Primary billing device connected."
+                                } else {
+                                    "Monitoring device restored from Google Drive."
+                                }
+                            )
+                            if (outcome.connection.mode == DeviceMode.PRIMARY) scheduleDriveUpload()
+                        }
+                    }
+                }
+                .onFailure { failure ->
+                    driveUiState = driveUiState.copy(
+                        stage = if (authReady) previousStage else DriveSetupStage.ERROR,
+                        message = failure.message ?: "Google Drive could not be connected."
+                    )
+                    if (authReady) operationError = driveUiState.message
+                }
+            isSyncing = false
+        }
+    }
+
+    fun continueOnThisDeviceOnly() {
+        authReady = true
+        driveUiState = DriveUiState(
+            stage = DriveSetupStage.LOCAL_ONLY,
+            message = "Device-only mode. Data is not synchronized with another device."
+        )
+    }
+
+    fun syncNow() {
+        val token = googleAccessToken
+        if (token == null) {
+            operationError = "Reconnect the store Gmail to refresh Google Drive access."
+            return
+        }
+        performDriveSync(token)
     }
 
     fun createInitialOwner(username: String, displayName: String, password: String) {
@@ -149,6 +276,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
                 .onSuccess { owner ->
                     currentUser = owner
                     needsOwnerSetup = false
+                    initializeDriveStoreIfNeeded()
                 }
                 .onFailure { ownerSetupError = it.message ?: "Owner account could not be created." }
         }
@@ -162,12 +290,19 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             currentUser = repository.authenticate(username, password)
             if (currentUser == null) loginError = "Incorrect username/password or inactive user."
+            else {
+                if (isMonitorMode) currentSection = AppSection.SALES
+                initializeDriveStoreIfNeeded()
+            }
         }
     }
 
     fun clearLoginError() { loginError = null }
 
     fun logout() {
+        if (isSaving) return
+        resumedOrder = null
+        heldProducts.clear()
         currentUser = null
         currentSection = AppSection.BILLING
         quantities.clear()
@@ -178,6 +313,10 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
 
     fun selectSection(section: AppSection) {
         val role = currentUser?.role ?: return
+        if (isMonitorMode && section !in setOf(AppSection.SALES, AppSection.EXPENSES, AppSection.INVENTORY)) {
+            operationError = "This is a read-only monitoring device."
+            return
+        }
         val permitted = when (section) {
             AppSection.BILLING -> AccessPolicy.allows(role, AppPermission.CREATE_BILL)
             AppSection.SALES -> true
@@ -191,7 +330,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
     fun selectCategory(category: String) { selectedCategory = category }
 
-    fun cartLines(): List<CartLine> = (products.value + miscProducts.values).mapNotNull { product ->
+    fun cartLines(catalog: List<ProductEntity> = products.value): List<CartLine> = (catalog.associateBy { it.id } + miscProducts + heldProducts).values.mapNotNull { product ->
         quantities[product.id]?.takeIf { it > 0 }?.let { CartLine(product, it) }
     }
 
@@ -199,10 +338,27 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     fun cartTotalPaise(): Long = cartLines().sumOf { it.lineTotalPaise }
 
     fun add(product: ProductEntity) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
         quantities[product.id] = (quantities[product.id] ?: 0) + 1
     }
 
+    fun addVoiceItems(items: List<VoiceCartItem>) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
+        if (isMonitorMode) {
+            operationError = "This is a read-only monitoring device."
+            return
+        }
+        val activeProductIds = products.value
+            .filter { it.isActive && !it.isDeleted }
+            .mapTo(mutableSetOf()) { it.id }
+        items.filter { it.productId in activeProductIds }.forEach { item ->
+            quantities[item.productId] = ((quantities[item.productId] ?: 0) + item.quantity)
+                .coerceAtMost(99)
+        }
+    }
+
     fun decrement(product: ProductEntity) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
         val next = (quantities[product.id] ?: 0) - 1
         if (next <= 0) {
             quantities.remove(product.id)
@@ -211,6 +367,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun addMisc(pricePaise: Long, description: String) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
         if (pricePaise <= 0) {
             operationError = "Enter a Misc price greater than zero."
             return
@@ -227,9 +384,70 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         quantities[id] = 1
     }
 
-    fun clearCart() {
+    private fun resetCart() {
         quantities.clear()
         miscProducts.clear()
+        heldProducts.clear()
+        resumedOrder = null
+    }
+
+    fun clearCart() {
+        if (isSaving) return
+        if (resumedOrder != null) {
+            operationError = "Save this order with Hold bill, or cancel it from Held orders."
+            return
+        }
+        resetCart()
+    }
+
+    fun holdCart(label: String) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
+        val actor = currentUser ?: return
+        val lines = cartLines()
+        if (lines.isEmpty()) return
+        val id = resumedOrder?.id
+        isSaving = true
+        viewModelScope.launch {
+            runCatching { repository.holdOrder(id, label, actor, lines) }
+                .onSuccess { resetCart(); scheduleDriveUpload() }
+                .onFailure { operationError = it.message ?: "Could not hold this bill." }
+            isSaving = false
+        }
+    }
+
+    fun resumeHeldOrder(order: HeldOrder) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
+        if (cartCount() > 0 || resumedOrder != null) {
+            operationError = "Hold or finish the current bill before resuming another order."
+            return
+        }
+        val actor = currentUser ?: return
+        isSaving = true
+        viewModelScope.launch {
+            runCatching {
+                val saved = repository.resumeOrder(order.id, actor)
+                val lines = saved.lines()
+                resetCart()
+                lines.forEach { heldProducts[it.product.id] = it.product; quantities[it.product.id] = it.quantity }
+                resumedOrder = saved
+            }.onFailure { operationError = it.message ?: "Could not resume this order." }
+            isSaving = false
+        }
+    }
+
+    fun cancelHeldOrder(order: HeldOrder, reason: String) {
+        if (isSaving || !hasPermission(AppPermission.CREATE_BILL)) return
+        val actor = currentUser ?: return
+        isSaving = true
+        viewModelScope.launch {
+            runCatching { repository.cancelHeldOrder(order.id, actor, reason) }
+                .onSuccess {
+                    if (resumedOrder?.id == order.id) resetCart()
+                    scheduleDriveUpload()
+                }
+                .onFailure { operationError = it.message ?: "Could not cancel this order." }
+            isSaving = false
+        }
     }
 
     fun checkout(
@@ -237,8 +455,13 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         requestedDiscountPaise: Long,
         cashReceivedPaise: Long? = null
     ) {
+        if (isMonitorMode) {
+            operationError = "This is a read-only monitoring device."
+            return
+        }
         val user = currentUser ?: return
         val lines = cartLines()
+        val heldOrderId = resumedOrder?.id
         if (lines.isEmpty() || isSaving) return
         isSaving = true
         operationError = null
@@ -246,22 +469,26 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
             val permittedDiscount = if (user.role == UserRole.EMPLOYEE) 0 else requestedDiscountPaise
             runCatching {
                 repository.completeSale(
-                    user,
-                    lines,
-                    paymentMethod,
-                    permittedDiscount,
-                    cashReceivedPaise,
-                    settings.value
+                    cashier = user,
+                    lines = lines,
+                    paymentMethod = paymentMethod,
+                    requestedDiscountPaise = permittedDiscount,
+                    cashReceivedPaise = cashReceivedPaise,
+                    settings = settings.value,
+                    businessId = driveSyncManager.preferences.storeId.ifBlank { "business-demo" },
+                    shopId = "shop-main",
+                    deviceId = driveSyncManager.preferences.deviceId,
+                    heldOrderId = heldOrderId
                 )
             }
                 .onSuccess {
-                    quantities.clear()
-                    miscProducts.clear()
+                    resetCart()
                     lastReceipt = it
                     val printerSettings = settings.value
                     if (printerSettings.printerEnabled && printerSettings.printerAutoPrint) {
                         printReceipt(it, showSuccess = false)
                     }
+                    scheduleDriveUpload()
                 }
                 .onFailure { operationError = it.message ?: "The bill could not be saved." }
             isSaving = false
@@ -322,13 +549,18 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
                 else repository.updateProduct(
                     existing.copy(name = name.trim(), category = category.trim(), pricePaise = priceRupees * 100)
                 )
-            }.onFailure { operationError = it.message ?: "Product could not be saved." }
+            }
+                .onSuccess { scheduleDriveUpload() }
+                .onFailure { operationError = it.message ?: "Product could not be saved." }
         }
     }
 
     fun toggleProduct(product: ProductEntity) {
         if (!hasPermission(AppPermission.MANAGE_PRODUCTS)) return
-        viewModelScope.launch { repository.updateProduct(product.copy(isActive = !product.isActive)) }
+        viewModelScope.launch {
+            repository.updateProduct(product.copy(isActive = !product.isActive))
+            scheduleDriveUpload()
+        }
     }
 
     fun deleteProduct(product: ProductEntity) {
@@ -336,6 +568,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         quantities.remove(product.id)
         viewModelScope.launch {
             runCatching { repository.deleteProduct(product) }
+                .onSuccess { scheduleDriveUpload() }
                 .onFailure { operationError = it.message ?: "Product could not be removed." }
         }
     }
@@ -344,6 +577,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         if (!hasPermission(AppPermission.MANAGE_PRODUCTS)) return
         viewModelScope.launch {
             runCatching { repository.saveCategoryOrder(names) }
+                .onSuccess { scheduleDriveUpload() }
                 .onFailure { operationError = it.message ?: "Category order could not be saved." }
         }
     }
@@ -352,6 +586,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         if (!hasPermission(AppPermission.MANAGE_USERS)) return
         viewModelScope.launch {
             runCatching { repository.addUser(username, displayName, role, password) }
+                .onSuccess { scheduleDriveUpload() }
                 .onFailure { operationError = it.message ?: "User could not be created." }
         }
     }
@@ -362,7 +597,10 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
             operationError = "You cannot deactivate your own signed-in account."
             return
         }
-        viewModelScope.launch { repository.updateUser(user.copy(isActive = !user.isActive)) }
+        viewModelScope.launch {
+            repository.updateUser(user.copy(isActive = !user.isActive))
+            scheduleDriveUpload()
+        }
     }
 
     fun cancelSale(sale: SaleEntity, reason: String) {
@@ -370,6 +608,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         val actor = currentUser ?: return
         viewModelScope.launch {
             runCatching { repository.cancelSale(sale, actor, reason) }
+                .onSuccess { scheduleDriveUpload() }
                 .onFailure { operationError = it.message ?: "Bill could not be cancelled." }
         }
     }
@@ -379,6 +618,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         val actor = currentUser ?: return
         viewModelScope.launch {
             runCatching { repository.saveSettings(settings, actor) }
+                .onSuccess { scheduleDriveUpload() }
                 .onFailure { operationError = it.message ?: "Settings could not be saved." }
         }
     }
@@ -397,6 +637,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
             runCatching {
                 repository.addExpense(actor, category, amountPaise, paymentMethod, supplierName, description, occurredAt)
             }
+                .onSuccess { scheduleDriveUpload() }
                 .onFailure { operationError = it.message ?: "Expense could not be saved." }
         }
     }
@@ -417,7 +658,9 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         if (!hasPermission(permission)) return
         val actor = currentUser ?: return
         viewModelScope.launch {
-            runCatching { action(actor) }.onFailure { operationError = it.message ?: "Expense could not be updated." }
+            runCatching { action(actor) }
+                .onSuccess { scheduleDriveUpload() }
+                .onFailure { operationError = it.message ?: "Expense could not be updated." }
         }
     }
 
@@ -426,6 +669,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         val actor = currentUser ?: return
         viewModelScope.launch {
             runCatching { repository.addInventoryItem(actor, name, unit, minimumMilli, openingMilli) }
+                .onSuccess { scheduleDriveUpload() }
                 .onFailure { operationError = it.message ?: "Inventory item could not be saved." }
         }
     }
@@ -442,6 +686,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         val actor = currentUser ?: return
         viewModelScope.launch {
             runCatching { repository.purchaseStock(actor, item, quantityMilli, totalCostPaise, paymentMethod, supplierName, description) }
+                .onSuccess { scheduleDriveUpload() }
                 .onFailure { operationError = it.message ?: "Stock purchase could not be saved." }
         }
     }
@@ -451,6 +696,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         val actor = currentUser ?: return
         viewModelScope.launch {
             runCatching { repository.adjustStock(actor, item, type, quantityMilli, description) }
+                .onSuccess { scheduleDriveUpload() }
                 .onFailure { operationError = it.message ?: "Stock adjustment could not be saved." }
         }
     }
@@ -460,6 +706,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         val actor = currentUser ?: return
         viewModelScope.launch {
             runCatching { repository.saveRecipeIngredient(actor, productId, inventoryItemId, quantityMilli) }
+                .onSuccess { scheduleDriveUpload() }
                 .onFailure { operationError = it.message ?: "Recipe could not be saved." }
         }
     }
@@ -469,6 +716,7 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
         val actor = currentUser ?: return
         viewModelScope.launch {
             runCatching { repository.deleteRecipeIngredient(actor, productId, inventoryItemId) }
+                .onSuccess { scheduleDriveUpload() }
                 .onFailure { operationError = it.message ?: "Recipe ingredient could not be removed." }
         }
     }
@@ -491,9 +739,82 @@ class BillingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun hasPermission(permission: AppPermission): Boolean {
+        if (isMonitorMode) {
+            operationError = "This is a read-only monitoring device."
+            return false
+        }
         val role = currentUser?.role
         if (role != null && AccessPolicy.allows(role, permission)) return true
         operationError = "Your role does not allow this action."
         return false
+    }
+
+    private fun initializeDriveStoreIfNeeded() {
+        if (driveUiState.stage != DriveSetupStage.DRIVE_EMPTY) return
+        val user = currentUser ?: return
+        if (user.role != UserRole.SUPER_USER) {
+            operationError = "The Super User must sign in once to initialize Google Drive."
+            return
+        }
+        val token = googleAccessToken ?: return
+        isSyncing = true
+        driveUiState = driveUiState.copy(message = "Creating protected store synchronization data…")
+        viewModelScope.launch {
+            runCatching { driveSyncManager.initializePrimaryStore(token) }
+                .onSuccess { result ->
+                    driveUiState = driveUiState.copy(
+                        stage = DriveSetupStage.READY,
+                        deviceMode = DeviceMode.PRIMARY,
+                        lastSyncAt = result.syncedAt,
+                        message = "Primary billing device synchronized."
+                    )
+                }
+                .onFailure { failure ->
+                    driveUiState = driveUiState.copy(
+                        message = failure.message ?: "The store could not be initialized in Google Drive."
+                    )
+                    operationError = driveUiState.message
+                }
+            isSyncing = false
+        }
+    }
+
+    private fun scheduleDriveUpload() {
+        if (driveUiState.deviceMode != DeviceMode.PRIMARY || driveUiState.stage != DriveSetupStage.READY) return
+        val token = googleAccessToken ?: return
+        scheduledSyncJob?.cancel()
+        scheduledSyncJob = viewModelScope.launch {
+            delay(1_500)
+            performDriveSync(token)
+        }
+    }
+
+    private fun performDriveSync(token: String) {
+        if (isSyncing) return
+        isSyncing = true
+        val previousStage = driveUiState.stage
+        driveUiState = driveUiState.copy(message = "Synchronizing with Google Drive…")
+        viewModelScope.launch {
+            runCatching { driveSyncManager.sync(token) }
+                .onSuccess { result ->
+                    driveUiState = driveUiState.copy(
+                        stage = DriveSetupStage.READY,
+                        lastSyncAt = result.syncedAt,
+                        message = if (result.uploaded) {
+                            "Store data uploaded successfully."
+                        } else {
+                            "Latest store activity downloaded."
+                        }
+                    )
+                }
+                .onFailure { failure ->
+                    driveUiState = driveUiState.copy(
+                        stage = if (authReady) previousStage else DriveSetupStage.ERROR,
+                        message = failure.message ?: "Google Drive synchronization failed."
+                    )
+                    operationError = driveUiState.message
+                }
+            isSyncing = false
+        }
     }
 }
